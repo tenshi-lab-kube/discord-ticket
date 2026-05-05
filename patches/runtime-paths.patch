@@ -1,0 +1,12 @@
+diff --git a/src/database.js b/src/database.js
+--- a/src/database.js
++++ b/src/database.js
+@@
+-const DB_PATH = path.join(__dirname, '..', 'data', 'tickets.db');
++const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'tickets.db');
+diff --git a/src/utils/config.js b/src/utils/config.js
+--- a/src/utils/config.js
++++ b/src/utils/config.js
+@@
+-const CONFIG_PATH = path.join(__dirname, "..", "..", "config.json");
++const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, "..", "..", "config.json");
