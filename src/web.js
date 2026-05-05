@@ -19,9 +19,6 @@ app.use(session({
   cookie: { maxAge: 1000 * 60 * 60 * 8, sameSite: 'lax' },
 }));
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'web', 'public')));
-
 function oidcEnabled() {
   return !!(process.env.OIDC_ISSUER && process.env.OIDC_CLIENT_ID && process.env.OIDC_CLIENT_SECRET);
 }
@@ -41,6 +38,16 @@ async function getOidcDiscovery() {
   oidcDiscoveryCache = await res.json();
   return oidcDiscoveryCache;
 }
+
+app.get('/', (req, res, next) => {
+  if (!req.session?.authenticated && oidcEnabled() && process.env.OIDC_AUTO_LOGIN !== 'false') {
+    return res.redirect('/auth/oidc/login');
+  }
+  next();
+});
+
+// Serve static files
+app.use(express.static(path.join(__dirname, 'web', 'public')));
 
 // Auth middleware for API
 function requireAuth(req, res, next) {
