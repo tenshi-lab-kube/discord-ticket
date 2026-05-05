@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: discord-ticket
+  namespace: discord-ticket
+  labels:
+    release: monitoring
+    app.kubernetes.io/name: discord-ticket
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: discord-ticket
+  namespaceSelector:
+    matchNames:
+      - discord-ticket
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
