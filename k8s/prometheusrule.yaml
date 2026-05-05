@@ -1,0 +1,69 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: discord-ticket-alerts
+  namespace: discord-ticket
+  labels:
+    release: monitoring
+    app.kubernetes.io/name: discord-ticket
+spec:
+  groups:
+    - name: discord-ticket.rules
+      rules:
+        - alert: DiscordTicketDown
+          expr: absent(discord_ticket_up) or discord_ticket_up == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: discord-ticket
+          annotations:
+            summary: Discord Ticket ne repond plus aux scrapes Prometheus
+            description: La metrique discord_ticket_up est absente ou vaut 0 depuis plus de 2 minutes.
+        - alert: DiscordTicketGuildDisconnected
+          expr: discord_ticket_guild_connected == 0
+          for: 5m
+          labels:
+            severity: warning
+            service: discord-ticket
+          annotations:
+            summary: Le bot Discord semble deconnecte de la guild
+            description: discord_ticket_guild_connected vaut 0 depuis plus de 5 minutes.
+        - alert: DiscordTicketHighHttpErrorRate
+          expr: |
+            sum(rate(discord_ticket_http_requests_total{status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(discord_ticket_http_requests_total[5m])), 0.001) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+            service: discord-ticket
+          annotations:
+            summary: Taux d'erreurs HTTP eleve sur Discord Ticket
+            description: Plus de 5% des requetes HTTP retournent une erreur 5xx depuis 10 minutes.
+        - alert: DiscordTicketMemoryHigh
+          expr: discord_ticket_process_memory_bytes{type="rss"} > 450 * 1024 * 1024
+          for: 10m
+          labels:
+            severity: warning
+            service: discord-ticket
+          annotations:
+            summary: Memoire elevee sur Discord Ticket
+            description: Le RSS Node approche la limite du conteneur de 512Mi.
+        - alert: DiscordTicketPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="discord-ticket",container!="POD"}[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+            service: discord-ticket
+          annotations:
+            summary: Pod Discord Ticket redemarre
+            description: Un conteneur Discord Ticket a redemarre au moins une fois sur les 15 dernieres minutes.
+        - alert: DiscordTicketOpenTicketTooOld
+          expr: discord_ticket_open_age_seconds > 72 * 3600
+          for: 15m
+          labels:
+            severity: info
+            service: discord-ticket
+          annotations:
+            summary: Ticket ouvert depuis plus de 72h
+            description: Un ticket Discord est ouvert depuis plus de 72 heures.
