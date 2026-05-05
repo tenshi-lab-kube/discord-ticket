@@ -2,6 +2,7 @@ const os = require('os');
 
 const startedAt = Date.now();
 const routeStats = new Map();
+const grafanaBaseUrl = process.env.GRAFANA_URL || 'https://grafana.tenshi-lab.fr';
 
 function normalizePath(req) {
   if (req.path === '/metrics') return '/metrics';
@@ -100,7 +101,7 @@ function getObservabilitySnapshot({ db, getConfig, client }) {
     routes: [...routeStats.values()].sort((a, b) => b.count - a.count).slice(0, 20),
     grafana: {
       dashboardUid: 'site-discord-ticket',
-      url: '/d/site-discord-ticket/site-discord-ticket',
+      url: `${grafanaBaseUrl}/d/site-discord-ticket/site-discord-ticket`,
     },
   };
 }
@@ -165,7 +166,7 @@ function observabilityPage() {
 <main>
   <header>
     <div><h1>Discord Ticket Observability</h1><p class="muted">Etat applicatif local, metriques runtime et liens Grafana.</p></div>
-    <div class="toolbar"><a class="btn" href="/">Dashboard</a><a class="btn" href="/metrics">Metrics</a><a class="btn" href="/d/site-discord-ticket/site-discord-ticket">Grafana</a></div>
+    <div class="toolbar"><a class="btn" href="/">Dashboard</a><a class="btn" href="/metrics">Metrics</a><a class="btn" href="${grafanaBaseUrl}/d/site-discord-ticket/site-discord-ticket">Grafana</a></div>
   </header>
   <section class="grid" id="cards"></section>
   <section class="card" style="margin-top:14px"><h2>Routes HTTP</h2><table><thead><tr><th>Route</th><th>Status</th><th>Requetes</th><th>Duree totale</th></tr></thead><tbody id="routes"></tbody></table></section>
