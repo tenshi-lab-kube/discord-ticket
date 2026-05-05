@@ -44,25 +44,48 @@ function metricLine(name, labels, value) {
   return `${name}{${labelText}} ${Number.isFinite(value) ? value : 0}`;
 }
 
+function incrementNested(acc, first, second) {
+  if (!acc[first]) acc[first] = {};
+  acc[first][second] = (acc[first][second] || 0) + 1;
+}
+
 function ticketStats(db, guildId) {
   const stats = db.getGuildStats(guildId) || {};
   const tickets = guildId ? db.getAllTickets(guildId) : [];
+  const transcripts = guildId ? db.getTranscripts(guildId) : [];
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+
   const byStatus = tickets.reduce((acc, ticket) => {
     acc[ticket.status] = (acc[ticket.status] || 0) + 1;
     return acc;
   }, {});
-  const byCategory = tickets.reduce((acc, ticket) => {
+  const byCategory = {};
+  const byCategoryStatus = {};
+
+  for (const ticket of tickets) {
     const category = ticket.category_id || 'unknown';
-    acc[category] = (acc[category] || 0) + 1;
-    return acc;
-  }, {});
+    const status = ticket.claimed_by ? 'claimed' : (ticket.status || 'unknown');
+    byCategory[category] = (byCategory[category] || 0) + 1;
+    incrementNested(byCategoryStatus, category, status);
+  }
+
+  const openTickets = tickets.filter(ticket => ticket.status === 'open');
+  const maxOpenAgeSeconds = openTickets.length
+    ? Math.max(...openTickets.map(ticket => Math.max(0, now - (ticket.created_at || now)))) / 1000
+    : 0;
 
   return {
     totalEver: stats.total_created || 0,
     open: byStatus.open || 0,
     closed: byStatus.closed || 0,
     claimed: tickets.filter(ticket => ticket.claimed_by).length,
+    deletedTranscripts: transcripts.length,
+    createdLast24h: tickets.filter(ticket => ticket.created_at && now - ticket.created_at <= dayMs).length,
+    closedLast24h: tickets.filter(ticket => ticket.closed_at && now - ticket.closed_at <= dayMs).length,
+    maxOpenAgeSeconds,
     byCategory,
+    byCategoryStatus,
     ticketCount: tickets.length,
   };
 }
@@ -106,6 +129,16 @@ function getObservabilitySnapshot({ db, getConfig, client }) {
   };
 }
 
+function categoryStatusLines(byCategoryStatus) {
+  const lines = [];
+  for (const [category, statuses] of Object.entries(byCategoryStatus)) {
+    for (const [status, count] of Object.entries(statuses)) {
+      lines.push(metricLine('discord_ticket_by_category_status', { category, status }, count));
+    }
+  }
+  return lines;
+}
+
 function renderMetrics(deps) {
   const snapshot = getObservabilitySnapshot(deps);
   const lines = [
@@ -132,14 +165,30 @@ function renderMetrics(deps) {
     metricLine('discord_ticket_current', { status: 'open' }, snapshot.tickets.open),
     metricLine('discord_ticket_current', { status: 'closed' }, snapshot.tickets.closed),
     metricLine('discord_ticket_current', { status: 'claimed' }, snapshot.tickets.claimed),
+    '# HELP discord_ticket_transcripts_total Saved ticket transcripts.',
+    '# TYPE discord_ticket_transcripts_total gauge',
+    `discord_ticket_transcripts_total ${snapshot.tickets.deletedTranscripts}`,
+    '# HELP discord_ticket_created_last_24h Tickets created during the last 24 hours.',
+    '# TYPE discord_ticket_created_last_24h gauge',
+    `discord_ticket_created_last_24h ${snapshot.tickets.createdLast24h}`,
+    '# HELP discord_ticket_closed_last_24h Tickets closed during the last 24 hours.',
+    '# TYPE discord_ticket_closed_last_24h gauge',
+    `discord_ticket_closed_last_24h ${snapshot.tickets.closedLast24h}`,
+    '# HELP discord_ticket_open_age_seconds Maximum age of currently open tickets.',
+    '# TYPE discord_ticket_open_age_seconds gauge',
+    `discord_ticket_open_age_seconds ${snapshot.tickets.maxOpenAgeSeconds}`,
     '# HELP discord_ticket_by_category Tickets currently known by category.',
     '# TYPE discord_ticket_by_category gauge',
     ...Object.entries(snapshot.tickets.byCategory).map(([category, count]) => metricLine('discord_ticket_by_category', { category }, count)),
+    '# HELP discord_ticket_by_category_status Tickets by category and status.',
+    '# TYPE discord_ticket_by_category_status gauge',
+    ...categoryStatusLines(snapshot.tickets.byCategoryStatus),
     '# HELP discord_ticket_process_memory_bytes Process memory usage.',
     '# TYPE discord_ticket_process_memory_bytes gauge',
     metricLine('discord_ticket_process_memory_bytes', { type: 'rss' }, snapshot.process.rssBytes),
     metricLine('discord_ticket_process_memory_bytes', { type: 'heap_used' }, snapshot.process.heapUsedBytes),
     metricLine('discord_ticket_process_memory_bytes', { type: 'heap_total' }, snapshot.process.heapTotalBytes),
+    metricLine('discord_ticket_process_memory_bytes', { type: 'external' }, snapshot.process.externalBytes),
     '# HELP discord_ticket_http_requests_total HTTP requests handled by the app.',
     '# TYPE discord_ticket_http_requests_total counter',
     ...[...routeStats.values()].map(stat => metricLine('discord_ticket_http_requests_total', { method: stat.method, route: stat.route, status: stat.status }, stat.count)),
@@ -175,7 +224,8 @@ function observabilityPage() {
 async function load(){
  const res=await fetch('/observability/data');
  const data=await res.json();
- const cards=[['Status',data.status,'ok'],['Uptime',Math.round(data.uptimeSeconds/60)+' min',''],['Guild',data.guild.connected?'Connecte':'Absent',data.guild.connected?'ok':'warn'],['Membres',data.guild.members,''],['Tickets ouverts',data.tickets.open,''],['Tickets fermes',data.tickets.closed,''],['Tickets crees',data.tickets.totalEver,''],['Heap',Math.round(data.process.heapUsedBytes/1024/1024)+' MiB','']];
+ const maxAge=Math.round((data.tickets.maxOpenAgeSeconds||0)/3600)+' h';
+ const cards=[['Status',data.status,'ok'],['Uptime',Math.round(data.uptimeSeconds/60)+' min',''],['Guild',data.guild.connected?'Connecte':'Absent',data.guild.connected?'ok':'warn'],['Membres',data.guild.members,''],['Tickets ouverts',data.tickets.open,''],['Tickets fermes',data.tickets.closed,''],['Tickets crees',data.tickets.totalEver,''],['Transcripts',data.tickets.deletedTranscripts,''],['Age max ouvert',maxAge,''],['Heap',Math.round(data.process.heapUsedBytes/1024/1024)+' MiB','']];
  document.getElementById('cards').innerHTML=cards.map(([label,value,cls])=>'<article class="card"><div class="label">'+label+'</div><div class="value '+cls+'">'+value+'</div></article>').join('');
  document.getElementById('routes').innerHTML=(data.routes||[]).map(r=>'<tr><td>'+r.method+' '+r.route+'</td><td>'+r.status+'</td><td>'+r.count+'</td><td>'+r.durationSeconds.toFixed(3)+'s</td></tr>').join('')||'<tr><td colspan="4" class="muted">Aucune requete observee.</td></tr>';
 }
