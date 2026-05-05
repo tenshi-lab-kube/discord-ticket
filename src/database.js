@@ -98,7 +98,7 @@ module.exports = {
   },
 
   updateTicketCategory(channelId, categoryId) {
-    return db.prepare('UPDATE tickets SET category_id = ? WHERE channel_id = ?').run(categoryId);
+    return db.prepare('UPDATE tickets SET category_id = ? WHERE channel_id = ?').run(categoryId, channelId);
   },
 
   // Soft-delete: garde la ligne pour que MAX(ticket_number) reste cohérent
