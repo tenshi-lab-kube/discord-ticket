@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const CONFIG_PATH = path.join(__dirname, "..", "..", "config.json");
+const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, "..", "..", "config.json");
 const EXAMPLE_PATH = path.join(__dirname, "..", "..", "config.example.json");
 
 function ensureConfigExists() {
