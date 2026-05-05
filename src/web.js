@@ -4,6 +4,10 @@ const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
 const apiRouter = require('./web/api');
+const db = require('./database');
+const { client } = require('./bot');
+const { getConfig } = require('./utils/config');
+const { observeHttp, renderMetrics, observabilityPage, getObservabilitySnapshot } = require('./observability');
 
 const app = express();
 let oidcDiscoveryCache = null;
@@ -11,6 +15,7 @@ let oidcDiscoveryCache = null;
 app.use(cors({ origin: false }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(observeHttp);
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'changeme-secret',
@@ -18,6 +23,8 @@ app.use(session({
   saveUninitialized: false,
   cookie: { maxAge: 1000 * 60 * 60 * 8, sameSite: 'lax' },
 }));
+
+const observabilityDeps = { db, getConfig, client };
 
 function oidcEnabled() {
   return !!(process.env.OIDC_ISSUER && process.env.OIDC_CLIENT_ID && process.env.OIDC_CLIENT_SECRET);
@@ -52,8 +59,22 @@ app.use(express.static(path.join(__dirname, 'web', 'public')));
 // Auth middleware for API
 function requireAuth(req, res, next) {
   if (req.session?.authenticated) return next();
-  res.status(401).json({ error: 'Non authentifié' });
+  res.status(401).json({ error: 'Non authentifie' });
 }
+
+app.get('/metrics', (req, res) => {
+  res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(renderMetrics(observabilityDeps));
+});
+
+app.get('/observability', requireAuth, (req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(observabilityPage());
+});
+
+app.get('/observability/data', requireAuth, (req, res) => {
+  res.json(getObservabilitySnapshot(observabilityDeps));
+});
 
 app.get('/auth/methods', (req, res) => {
   res.json({
