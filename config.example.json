@@ -1,0 +1,54 @@
+{
+  "guildId": "YOUR_GUILD_ID",
+  "logChannelId": "",
+  "staffRoles": [],
+  "adminRoles": [],
+  "ticketCategories": [
+    {
+      "id": "general",
+      "name": "Aide générale",
+      "emoji": "🆘",
+      "description": "Le staff peut t'aider !",
+      "categoryId": "",
+      "requiredRole": "",
+      "supportRoles": [],
+      "maxTickets": 1
+    },
+    {
+      "id": "giveaway",
+      "name": "Giveaway",
+      "emoji": "🎁",
+      "description": "Récupère ton cadeau !",
+      "categoryId": "",
+      "requiredRole": "",
+      "supportRoles": [],
+      "maxTickets": 1
+    },
+    {
+      "id": "event",
+      "name": "Événement",
+      "emoji": "📅",
+      "description": "Participe aux évènements",
+      "categoryId": "",
+      "requiredRole": "",
+      "supportRoles": [],
+      "maxTickets": 1
+    }
+  ],
+  "panel": {
+    "title": "OUVRIR UN TICKET",
+    "description": "Tu as besoin d'aide ou tu à une requête à effectuer ?\n\nClique sur le bouton ci-dessous ! ⬇️",
+    "color": "#5865F2",
+    "buttonLabel": "Ouvrir un ticket",
+    "placeholder": "Comment pouvons-nous t'aider ?",
+    "thumbnail": "",
+    "footer": ""
+  },
+  "tickets": {
+    "nameFormat": "{username}-{number}",
+    "openMessage": "Ton ticket a été créé.\nFournis-nous toute information supplémentaire que tu juges utile pour nous aider à répondre plus rapidement.",
+    "closedCategoryId": "",
+    "maxPerUser": 1,
+    "globalMax": false
+  }
+}

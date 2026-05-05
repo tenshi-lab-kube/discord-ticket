@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ticket Bot Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- LOGIN -->
+  <div id="login-screen" class="screen">
+    <div class="login-box">
+      <div class="login-logo">🎫</div>
+      <h1>Ticket Bot</h1>
+      <p>Dashboard d'administration</p>
+      <form id="login-form">
+        <input type="password" id="password-input" placeholder="Mot de passe" required>
+        <button type="submit">Se connecter</button>
+        <p id="login-error" class="error hidden">Mot de passe incorrect</p>
+      </form>
+    </div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="dashboard" class="screen hidden">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-logo">🎫</span>
+        <span>Ticket Bot</span>
+      </div>
+      <nav>
+        <button class="nav-btn active" data-page="overview">📊 Vue d'ensemble</button>
+        <button class="nav-btn" data-page="panel">🎨 Panel</button>
+        <button class="nav-btn" data-page="categories">📂 Catégories</button>
+        <button class="nav-btn" data-page="tickets">🎫 Tickets</button>
+        <button class="nav-btn" data-page="transcripts">📜 Transcripts</button>
+        <button class="nav-btn" data-page="settings">⚙️ Paramètres</button>
+      </nav>
+      <button id="logout-btn">↩ Déconnexion</button>
+    </aside>
+
+    <main class="content">
+      <!-- OVERVIEW -->
+      <section id="page-overview" class="page">
+        <h2>Vue d'ensemble</h2>
+        <div class="stats-grid">
+          <div class="stat-card stat-card-accent">
+            <div class="stat-icon">🎫</div>
+            <div class="stat-value" id="stat-ever">—</div>
+            <div class="stat-label">Total créés (tous temps)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">✅</div>
+            <div class="stat-value" id="stat-open">—</div>
+            <div class="stat-label">Ouverts</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🔒</div>
+            <div class="stat-value" id="stat-closed">—</div>
+            <div class="stat-label">Fermés</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">👑</div>
+            <div class="stat-value" id="stat-claimed">—</div>
+            <div class="stat-label">Claim</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header-row">
+            <h3>Tickets ouverts</h3>
+            <span id="open-count-badge" class="badge badge-open">0</span>
+          </div>
+          <div class="open-tickets-scroll">
+            <table id="open-tickets-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Salon</th>
+                  <th>Catégorie</th>
+                  <th>Créateur</th>
+                  <th>Claim</th>
+                  <th>Ouvert le</th>
+                </tr>
+              </thead>
+              <tbody id="open-tickets-body"><tr><td colspan="6" class="loading">Chargement…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- PANEL -->
+      <section id="page-panel" class="page hidden">
+        <h2>Configurer le Panel</h2>
+        <div class="two-col">
+          <div class="card">
+            <h3>Contenu</h3>
+            <form id="panel-form">
+              <label>Titre
+                <input type="text" name="title" placeholder="OUVRIR UN TICKET">
+              </label>
+              <label>Description
+                <textarea name="description" rows="5" placeholder="Description du panel…"></textarea>
+              </label>
+              <label>Texte du bouton
+                <input type="text" name="buttonLabel" placeholder="Ouvrir un ticket">
+              </label>
+              <label>Placeholder du menu éphémère
+                <input type="text" name="placeholder" placeholder="Comment pouvons-nous t'aider ?">
+              </label>
+              <label>Couleur (hex)
+                <div class="color-row">
+                  <input type="color" name="colorPicker" id="colorPicker" value="#5865F2">
+                  <input type="text" name="color" id="colorText" placeholder="#5865F2" maxlength="7">
+                </div>
+              </label>
+              <label>Thumbnail URL
+                <input type="url" name="thumbnail" placeholder="https://…">
+              </label>
+              <label>Footer
+                <input type="text" name="footer" placeholder="Texte du footer">
+              </label>
+              <button type="submit" class="btn-primary">💾 Sauvegarder</button>
+            </form>
+          </div>
+          <div class="card">
+            <h3>Aperçu</h3>
+            <div class="embed-preview" id="embed-preview">
+              <div class="embed-bar" id="preview-bar"></div>
+              <div class="embed-content">
+                <div class="embed-title" id="preview-title">OUVRIR UN TICKET</div>
+                <div class="embed-desc" id="preview-desc">Description…</div>
+                <div class="embed-footer" id="preview-footer"></div>
+              </div>
+            </div>
+            <hr>
+            <h3>Déployer le panel</h3>
+            <div class="deploy-row">
+              <select id="deploy-channel-select">
+                <option value="">Choisir un salon…</option>
+              </select>
+              <button id="deploy-btn" class="btn-primary">🚀 Déployer</button>
+            </div>
+            <p id="deploy-status" class="status-msg hidden"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- CATEGORIES -->
+      <section id="page-categories" class="page hidden">
+        <div class="page-header">
+          <h2>Catégories</h2>
+          <button class="btn-primary" id="add-category-btn">+ Ajouter</button>
+        </div>
+        <div id="categories-list" class="card-list"><div class="loading">Chargement…</div></div>
+      </section>
+
+      <!-- TICKETS -->
+      <section id="page-tickets" class="page hidden">
+        <h2>Tickets</h2>
+        <div class="filters">
+          <select id="ticket-filter-status">
+            <option value="">Tous les statuts</option>
+            <option value="open">Ouverts</option>
+            <option value="closed">Fermés</option>
+          </select>
+          <select id="ticket-filter-category">
+            <option value="">Toutes les catégories</option>
+          </select>
+        </div>
+        <div class="card">
+          <table id="tickets-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Utilisateur</th>
+                <th>Catégorie</th>
+                <th>Statut</th>
+                <th>Claim</th>
+                <th>Créé le</th>
+              </tr>
+            </thead>
+            <tbody id="tickets-body"><tr><td colspan="6" class="loading">Chargement…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- TRANSCRIPTS -->
+      <section id="page-transcripts" class="page hidden">
+        <h2>Transcripts</h2>
+        <div class="filters">
+          <select id="tf-category">
+            <option value="">Toutes les catégories</option>
+          </select>
+          <input type="date" id="tf-from" title="Du">
+          <input type="date" id="tf-to" title="Au">
+          <input type="text" id="tf-user" placeholder="ID créateur…" style="max-width:180px">
+          <button class="btn-secondary" id="tf-reset">↺ Réinitialiser</button>
+        </div>
+        <div class="card">
+          <table id="transcripts-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Salon</th>
+                <th>Catégorie</th>
+                <th>Créateur</th>
+                <th>Supprimé par</th>
+                <th>Messages</th>
+                <th>Date</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="transcripts-body"><tr><td colspan="8" class="loading">Chargement…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="page-settings" class="page hidden">
+        <h2>Paramètres</h2>
+        <div class="card">
+          <h3>Général</h3>
+          <form id="settings-form">
+            <label>ID du serveur (Guild ID)
+              <input type="text" name="guildId" placeholder="123456789012345678">
+            </label>
+            <label>Salon de logs
+              <select name="logChannelId">
+                <option value="">Aucun</option>
+              </select>
+            </label>
+            <label>Rôles Staff (IDs séparés par virgule)
+              <input type="text" name="staffRoles" placeholder="role_id1,role_id2">
+            </label>
+            <label>Rôles Admin (IDs séparés par virgule)
+              <input type="text" name="adminRoles" placeholder="role_id1,role_id2">
+            </label>
+            <button type="submit" class="btn-primary">💾 Sauvegarder</button>
+          </form>
+        </div>
+        <div class="card">
+          <h3>Tickets</h3>
+          <form id="ticket-settings-form">
+            <label>Format du nom <small>(variables: {number}, {username}, {category})</small>
+              <input type="text" name="nameFormat" placeholder="ticket-{number}">
+            </label>
+            <label>Message d'ouverture
+              <textarea name="openMessage" rows="3" placeholder="Ton ticket a été créé…"></textarea>
+            </label>
+            <label>Catégorie Discord pour tickets fermés
+              <select name="closedCategoryId">
+                <option value="">Aucune</option>
+              </select>
+            </label>
+            <label>Max tickets ouverts par utilisateur
+              <input type="number" name="maxPerUser" min="1" max="10" value="1">
+            </label>
+            <label class="toggle-label">
+              <div class="toggle-row">
+                <span>Limite globale (tous types de tickets confondus)</span>
+                <input type="checkbox" name="globalMax" id="globalMax-toggle" role="switch">
+              </div>
+              <small>Si activé, un utilisateur ne peut pas ouvrir plus de X tickets au total, peu importe la catégorie.</small>
+            </label>
+            <button type="submit" class="btn-primary">💾 Sauvegarder</button>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- MODAL: Category editor -->
+  <div id="category-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-title">Ajouter une catégorie</h3>
+        <button class="modal-close" id="modal-close-btn">✕</button>
+      </div>
+      <form id="category-form">
+        <input type="hidden" name="editId">
+        <label>ID unique <small>(lettres minuscules, tirets)</small>
+          <input type="text" name="id" placeholder="aide-generale" pattern="[a-z0-9\-]+" required>
+        </label>
+        <label>Nom
+          <input type="text" name="name" placeholder="Aide générale" required>
+        </label>
+        <label>Emoji
+          <input type="text" name="emoji" placeholder="🆘" maxlength="4">
+        </label>
+        <label>Description
+          <input type="text" name="description" placeholder="Le staff peut t'aider !" maxlength="100">
+        </label>
+        <label>Catégorie Discord
+          <div class="cat-channel-row">
+            <select name="categoryId">
+              <option value="">Aucune</option>
+            </select>
+            <button type="button" id="create-discord-cat-btn" class="btn-secondary">+ Créer</button>
+          </div>
+          <small id="create-discord-cat-status" class="create-cat-status hidden"></small>
+        </label>
+        <label>Rôle requis pour accéder <small>(laisser vide = tout le monde)</small>
+          <input type="text" name="requiredRole" placeholder="ID du rôle Discord">
+        </label>
+        <label>Rôles de support (IDs séparés par virgule)
+          <input type="text" name="supportRoles" placeholder="role_id1,role_id2">
+        </label>
+        <label>Max tickets par utilisateur <small>(par catégorie, ignoré si max global activé)</small>
+          <input type="number" name="maxTickets" min="1" max="10" value="1">
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="modal-cancel-btn">Annuler</button>
+          <button type="submit" class="btn-primary">Sauvegarder</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Reopen ticket from transcript -->
+  <div id="reopen-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>🔓 Réouvrir le ticket</h3>
+        <button class="modal-close" id="reopen-modal-close">✕</button>
+      </div>
+      <div id="reopen-info" class="reopen-info"></div>
+      <form id="reopen-form">
+        <input type="hidden" name="transcriptId">
+        <label>Catégorie
+          <select name="categoryId" id="reopen-category-select"></select>
+        </label>
+        <label>Utilisateurs avec accès <small>(créateur ajouté automatiquement)</small>
+          <div id="reopen-users-list" class="reopen-users-list"></div>
+          <div class="reopen-add-row">
+            <input type="text" id="reopen-add-user-input" placeholder="ID Discord à ajouter…">
+            <button type="button" id="reopen-add-user-btn" class="btn-secondary">+ Ajouter</button>
+          </div>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="reopen-cancel-btn">Annuler</button>
+          <button type="submit" class="btn-primary">🔓 Réouvrir</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Transcript viewer -->
+  <div id="transcript-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-box transcript-modal-box">
+      <div class="modal-header">
+        <h3 id="transcript-modal-title">Transcript</h3>
+        <button class="modal-close" id="transcript-modal-close">✕</button>
+      </div>
+      <div class="transcript-meta" id="transcript-meta"></div>
+      <div class="transcript-messages" id="transcript-messages">
+        <div class="loading">Chargement…</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

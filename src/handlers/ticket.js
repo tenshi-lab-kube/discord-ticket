@@ -1,0 +1,433 @@
+const {
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  PermissionFlagsBits,
+  ChannelType,
+  MessageFlags,
+} = require('discord.js');
+const db = require('../database');
+const { getConfig } = require('../utils/config');
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildTicketButtons(status = 'open') {
+  const row = new ActionRowBuilder();
+  if (status === 'open') {
+    row.addComponents(
+      new ButtonBuilder().setCustomId('ticket_claim').setLabel('Claim').setEmoji('👑').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('ticket_close').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket_reopen').setLabel('Reopen').setEmoji('🔓').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('ticket_delete').setLabel('Delete').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+    );
+  } else {
+    row.addComponents(
+      new ButtonBuilder().setCustomId('ticket_reopen').setLabel('Reopen').setEmoji('🔓').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('ticket_delete').setLabel('Delete').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+    );
+  }
+  return row;
+}
+
+// customId format: tc:{action}:{originalMessageId}
+function buildConfirmRow(action, originalMessageId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`tc:${action}:${originalMessageId}`)
+      .setLabel('Confirmer')
+      .setEmoji('✅')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId('tc:cancel')
+      .setLabel('Annuler')
+      .setEmoji('❌')
+      .setStyle(ButtonStyle.Secondary),
+  );
+}
+
+function isStaff(member, config) {
+  if (!config.staffRoles?.length) return member.permissions.has(PermissionFlagsBits.ManageChannels);
+  return config.staffRoles.some(roleId => member.roles.cache.has(roleId));
+}
+
+async function sendLog(guild, config, embed) {
+  if (!config.logChannelId) return;
+  const ch = guild.channels.cache.get(config.logChannelId);
+  if (ch) await ch.send({ embeds: [embed] }).catch(() => {});
+}
+
+async function fetchAllMessages(channel) {
+  const messages = [];
+  let before = null;
+  while (true) {
+    const options = { limit: 100 };
+    if (before) options.before = before;
+    const batch = await channel.messages.fetch(options).catch(() => null);
+    if (!batch || !batch.size) break;
+    batch.forEach(msg => messages.push({
+      id: msg.id,
+      author: msg.author.username,
+      authorId: msg.author.id,
+      bot: msg.author.bot,
+      content: msg.content || '',
+      embeds: msg.embeds.map(e => ({
+        title: e.title || null,
+        description: e.description || null,
+        color: e.hexColor || null,
+        fields: e.fields?.map(f => ({ name: f.name, value: f.value })) ?? [],
+        footer: e.footer?.text || null,
+      })),
+      attachments: [...msg.attachments.values()].map(a => ({ name: a.name, url: a.url })),
+      timestamp: msg.createdTimestamp,
+    }));
+    before = batch.last().id;
+    if (batch.size < 100) break;
+  }
+  return messages.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+// ── Bouton du panel → menu éphémère dynamique ─────────────────────────────────
+
+async function handleOpenTicketPanel(interaction) {
+  const config = getConfig();
+  const member = interaction.member;
+
+  // Filtrer les catégories selon le rôle requis
+  const accessible = (config.ticketCategories ?? []).filter(cat => {
+    if (!cat.requiredRole) return true;
+    return member.roles.cache.has(cat.requiredRole);
+  });
+
+  if (!accessible.length) {
+    return interaction.reply({
+      content: '❌ Tu n\'as accès à aucune catégorie de ticket.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('ticket_category_select')
+    .setPlaceholder(config.panel?.placeholder ?? 'Comment pouvons-nous t\'aider ?')
+    .addOptions(accessible.map(cat => ({
+      label: cat.name,
+      description: cat.description?.slice(0, 100) ?? '',
+      value: cat.id,
+      emoji: cat.emoji || undefined,
+    })));
+
+  await interaction.reply({
+    components: [new ActionRowBuilder().addComponents(select)],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+// ── Création de ticket ────────────────────────────────────────────────────────
+
+async function handleCategorySelect(interaction) {
+  const config = getConfig();
+  const categoryId = interaction.values[0];
+  const category = config.ticketCategories.find(c => c.id === categoryId);
+  if (!category) return interaction.reply({ content: '❌ Catégorie introuvable.', flags: MessageFlags.Ephemeral });
+
+  // Double-vérif rôle requis (au cas où l'utilisateur passerait par un ancien panel statique)
+  if (category.requiredRole && !interaction.member.roles.cache.has(category.requiredRole)) {
+    return interaction.reply({
+      content: '❌ Tu n\'as pas le rôle requis pour ouvrir un ticket dans cette catégorie.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  // Vérification du nombre max de tickets (global ou par catégorie)
+  const globalMax = config.tickets?.globalMax ?? false;
+  const globalLimit = config.tickets?.maxPerUser ?? 1;
+
+  if (globalMax) {
+    const allOpen = db.getOpenTicketsByUserGlobal(interaction.user.id, interaction.guildId);
+    if (allOpen.length >= globalLimit) {
+      return interaction.reply({
+        content: `❌ Tu as déjà **${allOpen.length}** ticket(s) ouvert(s) (limite globale : ${globalLimit}).\nTicket ouvert : <#${allOpen[0].channel_id}>`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+  } else {
+    const existing = db.getOpenTicketsByUser(interaction.user.id, interaction.guildId, categoryId);
+    const catLimit = category.maxTickets ?? globalLimit;
+    if (existing.length >= catLimit) {
+      return interaction.reply({
+        content: `❌ Tu as déjà un ticket ouvert dans cette catégorie : <#${existing[0].channel_id}>`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+  }
+
+  // Acknowledge — mise à jour du menu éphémère si vient du bouton, sinon defer
+  const isEphemeral = interaction.message.flags.has(MessageFlags.Ephemeral);
+  if (isEphemeral) {
+    await interaction.update({ content: '⏳ Création de ton ticket…', components: [] });
+  } else {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  }
+
+  const guild = interaction.guild;
+  const ticketNumber = db.getNextTicketNumber(guild.id);
+
+  const safeUsername = interaction.user.username
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 20) || 'user';
+
+  const channelName = (config.tickets?.nameFormat ?? '{username}-{number}')
+    .replace('{number}', String(ticketNumber).padStart(4, '0'))
+    .replace('{username}', safeUsername)
+    .replace('{category}', category.id);
+
+  const permissionOverwrites = [
+    { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+    {
+      id: interaction.user.id,
+      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+    },
+  ];
+
+  const roleIds = [
+    ...(config.staffRoles ?? []),
+    ...(config.adminRoles ?? []),
+    ...(category.supportRoles ?? []),
+  ];
+  for (const roleId of [...new Set(roleIds)]) {
+    permissionOverwrites.push({
+      id: roleId,
+      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+    });
+  }
+
+  let discordCategory = null;
+  if (category.categoryId) discordCategory = guild.channels.cache.get(category.categoryId);
+
+  const channel = await guild.channels.create({
+    name: channelName,
+    type: ChannelType.GuildText,
+    parent: discordCategory ?? undefined,
+    permissionOverwrites,
+    topic: `Ticket de ${interaction.user.tag} | Catégorie: ${category.name}`,
+  });
+
+  db.createTicket({ ticketNumber, channelId: channel.id, guildId: guild.id, userId: interaction.user.id, categoryId });
+  db.incrementGuildTotal(guild.id);
+
+  const openEmbed = new EmbedBuilder()
+    .setColor(config.panel?.color ?? '#5865F2')
+    .setDescription(
+      `${config.tickets?.openMessage ?? 'Ton ticket a été créé.'}\n\n` +
+      `**Catégorie:** ${category.emoji} ${category.name}\n` +
+      `**Créateur:** <@${interaction.user.id}>`
+    )
+    .setFooter({ text: `Ticket #${String(ticketNumber).padStart(4, '0')}` })
+    .setTimestamp();
+
+  const msg = await channel.send({
+    content: `<@${interaction.user.id}>`,
+    embeds: [openEmbed],
+    components: [buildTicketButtons('open')],
+  });
+
+  await msg.pin().catch(() => {});
+
+  await sendLog(guild, config, new EmbedBuilder()
+    .setColor('#57F287').setTitle('Ticket Créé')
+    .addFields(
+      { name: 'Utilisateur', value: `<@${interaction.user.id}>`, inline: true },
+      { name: 'Catégorie', value: `${category.emoji} ${category.name}`, inline: true },
+      { name: 'Salon', value: `<#${channel.id}>`, inline: true },
+    ).setTimestamp()
+  );
+
+  await interaction.editReply({ content: `✅ Ton ticket a été créé : <#${channel.id}>` });
+}
+
+// ── Confirmations initiales ───────────────────────────────────────────────────
+
+async function handleClaim(interaction) {
+  const config = getConfig();
+  if (!isStaff(interaction.member, config)) {
+    return interaction.reply({ content: '❌ Réservé au staff.', flags: MessageFlags.Ephemeral });
+  }
+  const ticket = db.getTicketByChannel(interaction.channelId);
+  if (!ticket) return interaction.reply({ content: '❌ Ticket introuvable.', flags: MessageFlags.Ephemeral });
+  if (ticket.claimed_by) {
+    return interaction.reply({ content: `❌ Déjà claim par <@${ticket.claimed_by}>.`, flags: MessageFlags.Ephemeral });
+  }
+  await interaction.reply({
+    content: '👑 Confirmes-tu vouloir **claim** ce ticket ?',
+    components: [buildConfirmRow('claim', interaction.message.id)],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function handleClose(interaction) {
+  const config = getConfig();
+  const ticket = db.getTicketByChannel(interaction.channelId);
+  if (!ticket) return interaction.reply({ content: '❌ Ticket introuvable.', flags: MessageFlags.Ephemeral });
+  const isOwner = ticket.user_id === interaction.user.id;
+  if (!isOwner && !isStaff(interaction.member, config)) {
+    return interaction.reply({ content: '❌ Permission refusée.', flags: MessageFlags.Ephemeral });
+  }
+  await interaction.reply({
+    content: '🔒 Confirmes-tu vouloir **fermer** ce ticket ?',
+    components: [buildConfirmRow('close', interaction.message.id)],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function handleReopen(interaction) {
+  const config = getConfig();
+  if (!isStaff(interaction.member, config)) {
+    return interaction.reply({ content: '❌ Réservé au staff.', flags: MessageFlags.Ephemeral });
+  }
+  await interaction.reply({
+    content: '🔓 Confirmes-tu vouloir **ré-ouvrir** ce ticket ?',
+    components: [buildConfirmRow('reopen', interaction.message.id)],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function handleDelete(interaction) {
+  const config = getConfig();
+  if (!isStaff(interaction.member, config)) {
+    return interaction.reply({ content: '❌ Réservé au staff.', flags: MessageFlags.Ephemeral });
+  }
+  await interaction.reply({
+    content: '🗑️ Confirmes-tu vouloir **supprimer définitivement** ce ticket ?\n> Le transcript sera sauvegardé automatiquement.',
+    components: [buildConfirmRow('delete', interaction.message.id)],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+// ── Exécutions après confirmation ─────────────────────────────────────────────
+
+async function executeClaim(interaction, originalMessageId) {
+  const config = getConfig();
+  const ticket = db.getTicketByChannel(interaction.channelId);
+  if (!ticket) return interaction.update({ content: '❌ Ticket introuvable.', components: [] });
+
+  db.updateTicketStatus(interaction.channelId, 'open', interaction.user.id);
+  await interaction.channel.setName(`claimed-${interaction.channel.name.replace(/^claimed-/, '')}`).catch(() => {});
+
+  await interaction.update({ content: '✅ Ticket claim.', components: [] });
+  await interaction.channel.send({
+    embeds: [new EmbedBuilder().setColor('#FEE75C').setDescription(`👑 Ticket claim par <@${interaction.user.id}>.`).setTimestamp()],
+  });
+
+  const orig = await interaction.channel.messages.fetch(originalMessageId).catch(() => null);
+  if (orig) await orig.edit({ components: [buildTicketButtons('open')] }).catch(() => {});
+
+  await sendLog(interaction.guild, config, new EmbedBuilder()
+    .setColor('#FEE75C').setTitle('Ticket Claim')
+    .addFields(
+      { name: 'Staff', value: `<@${interaction.user.id}>`, inline: true },
+      { name: 'Salon', value: `<#${interaction.channelId}>`, inline: true },
+    ).setTimestamp()
+  );
+}
+
+async function executeClose(interaction, originalMessageId) {
+  const config = getConfig();
+  const ticket = db.getTicketByChannel(interaction.channelId);
+  if (!ticket) return interaction.update({ content: '❌ Ticket introuvable.', components: [] });
+
+  db.updateTicketStatus(interaction.channelId, 'closed');
+  await interaction.channel.permissionOverwrites.edit(ticket.user_id, { ViewChannel: false }).catch(() => {});
+
+  if (config.tickets?.closedCategoryId) {
+    const closedCat = interaction.guild.channels.cache.get(config.tickets.closedCategoryId);
+    if (closedCat) await interaction.channel.setParent(closedCat, { lockPermissions: false }).catch(() => {});
+  }
+
+  await interaction.update({ content: '✅ Ticket fermé.', components: [] });
+  await interaction.channel.send({
+    embeds: [new EmbedBuilder().setColor('#ED4245').setDescription(`🔒 Ticket fermé par <@${interaction.user.id}>.`).setTimestamp()],
+  });
+
+  const orig = await interaction.channel.messages.fetch(originalMessageId).catch(() => null);
+  if (orig) await orig.edit({ components: [buildTicketButtons('closed')] }).catch(() => {});
+
+  await sendLog(interaction.guild, config, new EmbedBuilder()
+    .setColor('#ED4245').setTitle('Ticket Fermé')
+    .addFields(
+      { name: 'Fermé par', value: `<@${interaction.user.id}>`, inline: true },
+      { name: 'Salon', value: `<#${interaction.channelId}>`, inline: true },
+    ).setTimestamp()
+  );
+}
+
+async function executeReopen(interaction, originalMessageId) {
+  const config = getConfig();
+  const ticket = db.getTicketByChannel(interaction.channelId);
+  if (!ticket) return interaction.update({ content: '❌ Ticket introuvable.', components: [] });
+
+  db.updateTicketStatus(interaction.channelId, 'open', null);
+  await interaction.channel.permissionOverwrites.edit(ticket.user_id, {
+    ViewChannel: true, SendMessages: true, ReadMessageHistory: true,
+  }).catch(() => {});
+
+  const category = config.ticketCategories.find(c => c.id === ticket.category_id);
+  if (category?.categoryId) {
+    const cat = interaction.guild.channels.cache.get(category.categoryId);
+    if (cat) await interaction.channel.setParent(cat, { lockPermissions: false }).catch(() => {});
+  }
+
+  await interaction.update({ content: '✅ Ticket ré-ouvert.', components: [] });
+  await interaction.channel.send({
+    embeds: [new EmbedBuilder().setColor('#57F287').setDescription(`🔓 Ticket ré-ouvert par <@${interaction.user.id}>.`).setTimestamp()],
+  });
+
+  const orig = await interaction.channel.messages.fetch(originalMessageId).catch(() => null);
+  if (orig) await orig.edit({ components: [buildTicketButtons('open')] }).catch(() => {});
+}
+
+async function executeDelete(interaction, originalMessageId) {
+  const config = getConfig();
+  const ticket = db.getTicketByChannel(interaction.channelId);
+
+  await interaction.update({ content: '📋 Sauvegarde du transcript… suppression dans 5 secondes.', components: [] });
+
+  const messages = await fetchAllMessages(interaction.channel);
+
+  if (ticket) {
+    db.saveTranscript({
+      ticketNumber: ticket.ticket_number,
+      channelName: interaction.channel.name,
+      guildId: interaction.guildId,
+      userId: ticket.user_id,
+      categoryId: ticket.category_id,
+      deletedBy: interaction.user.id,
+      deletedAt: Date.now(),
+      messageCount: messages.length,
+      messages,
+    });
+    db.softDeleteTicket(interaction.channelId);
+  }
+
+  await sendLog(interaction.guild, config, new EmbedBuilder()
+    .setColor('#ED4245').setTitle('Ticket Supprimé')
+    .addFields(
+      { name: 'Supprimé par', value: `<@${interaction.user.id}>`, inline: true },
+      { name: 'Salon', value: `#${interaction.channel.name}`, inline: true },
+      ticket
+        ? { name: 'Créateur', value: `<@${ticket.user_id}>`, inline: true }
+        : { name: '​', value: '​', inline: true },
+      { name: 'Messages archivés', value: String(messages.length), inline: true },
+    ).setTimestamp()
+  );
+
+  setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
+}
+
+module.exports = {
+  handleOpenTicketPanel,
+  handleCategorySelect,
+  handleClaim, handleClose, handleReopen, handleDelete,
+  executeClaim, executeClose, executeReopen, executeDelete,
+};
