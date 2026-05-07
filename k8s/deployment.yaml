@@ -16,6 +16,8 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: discord-ticket
+      annotations:
+        app.kubernetes.io/rollout-revision: "embed-builder-2026-05-07"
     spec:
       securityContext:
         fsGroup: 1000
