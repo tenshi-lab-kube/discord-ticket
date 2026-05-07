@@ -37,6 +37,35 @@ function formatBanExpiration(expiresAt) {
   return `jusqu'au <t:${Math.floor(expiresAt / 1000)}:F>`;
 }
 
+const EMBED_COLORS = {
+  success: '#57F287',
+  error: '#ED4245',
+  info: '#5865F2',
+  warning: '#FEE75C',
+};
+
+function embedField(name, value, inline = true) {
+  return { name, value: String(value || '-').slice(0, 1024), inline };
+}
+
+function commandEmbed(type, title, description, fields = []) {
+  const embed = new EmbedBuilder()
+    .setColor(EMBED_COLORS[type] ?? EMBED_COLORS.info)
+    .setTitle(title)
+    .setDescription(description)
+    .setTimestamp();
+
+  if (fields.length) embed.addFields(fields);
+  return embed;
+}
+
+function replyEmbed(interaction, type, title, description, fields = [], ephemeral = true) {
+  return interaction.reply({
+    embeds: [commandEmbed(type, title, description, fields)],
+    ephemeral,
+  });
+}
+
 const setupCommand = {
   data: new SlashCommandBuilder()
     .setName('setup')
@@ -45,14 +74,21 @@ const setupCommand = {
   async execute(interaction) {
     const config = getConfig();
     if (!config.ticketCategories?.length) {
-      return interaction.reply({ content: '❌ Aucune catégorie configurée. Utilise le dashboard web.', ephemeral: true });
+      return replyEmbed(
+        interaction,
+        'warning',
+        'Aucune categorie configuree',
+        'Ajoute au moins une categorie depuis le dashboard web avant de deployer le panel.'
+      );
     }
 
     await interaction.deferReply({ ephemeral: true });
     const msg = await interaction.channel.send(buildPanelMessage(config));
     db.savePanel(interaction.guildId, interaction.channelId, msg.id);
 
-    await interaction.editReply({ content: `✅ Panel déployé dans <#${interaction.channelId}>` });
+    await interaction.editReply({
+      embeds: [commandEmbed('success', 'Panel deploye', `Le panel de tickets a ete envoye dans <#${interaction.channelId}>.`)],
+    });
   }
 };
 
@@ -94,26 +130,26 @@ const ticketCommand = {
   async execute(interaction) {
     const config = getConfig();
     const ticket = db.getTicketByChannel(interaction.channelId);
-    if (!ticket) return interaction.reply({ content: '❌ Ce salon n\'est pas un ticket.', ephemeral: true });
+    if (!ticket) return replyEmbed(interaction, 'error', 'Salon invalide', 'Cette commande doit etre utilisee dans un ticket.');
 
     const sub = interaction.options.getSubcommand();
 
     if (sub === 'rename') {
       if (!isStaff(interaction.member, config)) {
-        return interaction.reply({ content: '❌ Réservé au staff.', ephemeral: true });
+        return replyEmbed(interaction, 'error', 'Acces refuse', 'Cette action est reservee au staff.');
       }
       const name = interaction.options.getString('nom').toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 100);
       await interaction.channel.setName(name);
-      return interaction.reply({ content: `✅ Ticket renommé en **${name}**`, ephemeral: true });
+      return replyEmbed(interaction, 'success', 'Ticket renomme', `Nouveau nom: **${name}**.`);
     }
 
     if (sub === 'move') {
       if (!isStaff(interaction.member, config)) {
-        return interaction.reply({ content: '❌ Réservé au staff.', ephemeral: true });
+        return replyEmbed(interaction, 'error', 'Acces refuse', 'Cette action est reservee au staff.');
       }
       const catId = interaction.options.getString('categorie');
       const category = config.ticketCategories.find(c => c.id === catId);
-      if (!category) return interaction.reply({ content: '❌ Catégorie introuvable.', ephemeral: true });
+      if (!category) return replyEmbed(interaction, 'error', 'Categorie introuvable', 'La categorie demandee n existe pas dans la configuration.');
 
       if (category.categoryId) {
         const discordCat = interaction.guild.channels.cache.get(category.categoryId);
@@ -121,30 +157,30 @@ const ticketCommand = {
       }
 
       db.updateTicketCategory(interaction.channelId, catId);
-      return interaction.reply({ content: `✅ Ticket déplacé vers **${category.emoji} ${category.name}**` });
+      return replyEmbed(interaction, 'success', 'Ticket deplace', `Nouvelle categorie: **${category.emoji} ${category.name}**.`, [], false);
     }
 
     if (sub === 'add') {
       if (!isStaff(interaction.member, config)) {
-        return interaction.reply({ content: '❌ Réservé au staff.', ephemeral: true });
+        return replyEmbed(interaction, 'error', 'Acces refuse', 'Cette action est reservee au staff.');
       }
       const user = interaction.options.getUser('utilisateur');
       await interaction.channel.permissionOverwrites.edit(user.id, {
         ViewChannel: true, SendMessages: true, ReadMessageHistory: true,
       });
-      return interaction.reply({ content: `✅ <@${user.id}> ajouté au ticket.` });
+      return replyEmbed(interaction, 'success', 'Utilisateur ajoute', `<@${user.id}> a maintenant acces au ticket.`, [], false);
     }
 
     if (sub === 'remove') {
       if (!isStaff(interaction.member, config)) {
-        return interaction.reply({ content: '❌ Réservé au staff.', ephemeral: true });
+        return replyEmbed(interaction, 'error', 'Acces refuse', 'Cette action est reservee au staff.');
       }
       const user = interaction.options.getUser('utilisateur');
       if (user.id === ticket.user_id) {
-        return interaction.reply({ content: '❌ Impossible de retirer le créateur du ticket.', ephemeral: true });
+        return replyEmbed(interaction, 'warning', 'Action impossible', 'Le createur du ticket doit garder acces au salon.');
       }
       await interaction.channel.permissionOverwrites.delete(user.id);
-      return interaction.reply({ content: `✅ <@${user.id}> retiré du ticket.` });
+      return replyEmbed(interaction, 'success', 'Utilisateur retire', `<@${user.id}> n a plus acces au ticket.`, [], false);
     }
   }
 };
@@ -174,7 +210,7 @@ const ticketBanCommand = {
   async execute(interaction) {
     const config = getConfig();
     if (!isStaff(interaction.member, config)) {
-      return interaction.reply({ content: '❌ Reserve au staff.', ephemeral: true });
+      return replyEmbed(interaction, 'error', 'Acces refuse', 'Cette commande est reservee au staff.');
     }
 
     const sub = interaction.options.getSubcommand();
@@ -182,16 +218,18 @@ const ticketBanCommand = {
 
     if (sub === 'ban') {
       if (user.bot) {
-        return interaction.reply({ content: '❌ Impossible de bannir un bot des tickets.', ephemeral: true });
+        return replyEmbed(interaction, 'warning', 'Action impossible', 'Un bot ne peut pas etre banni de l ouverture de tickets.');
       }
 
       const duration = interaction.options.getString('duree');
       const expiresAt = parseDuration(duration);
       if (expiresAt === undefined) {
-        return interaction.reply({
-          content: '❌ Duree invalide. Exemples valides: `30m`, `2h`, `7d`, `1mo`, `1y`. Laisse vide pour un ban definitif.',
-          ephemeral: true,
-        });
+        return replyEmbed(
+          interaction,
+          'warning',
+          'Duree invalide',
+          'Exemples valides: `30m`, `2h`, `7d`, `1mo`, `1y`. Laisse vide pour un ban definitif.'
+        );
       }
 
       const reason = interaction.options.getString('raison') ?? 'Aucune raison indiquee';
@@ -203,34 +241,32 @@ const ticketBanCommand = {
         expiresAt,
       });
 
-      return interaction.reply({
-        content: `✅ <@${user.id}> est banni des tickets ${formatBanExpiration(expiresAt)}.\nRaison: ${reason}`,
-        ephemeral: true,
-      });
+      return replyEmbed(interaction, 'success', 'Ban ticket applique', `<@${user.id}> ne peut plus ouvrir de tickets.`, [
+        embedField('Duree', formatBanExpiration(expiresAt)),
+        embedField('Raison', reason, false),
+      ]);
     }
 
     if (sub === 'unban') {
       const result = db.revokeTicketBan(user.id, interaction.guildId, interaction.user.id);
       if (!result.changes) {
-        return interaction.reply({ content: `ℹ️ <@${user.id}> n'a pas de ban ticket actif.`, ephemeral: true });
+        return replyEmbed(interaction, 'info', 'Aucun ban actif', `<@${user.id}> n a pas de ban ticket actif.`);
       }
 
-      return interaction.reply({ content: `✅ <@${user.id}> peut de nouveau ouvrir des tickets.`, ephemeral: true });
+      return replyEmbed(interaction, 'success', 'Ban ticket retire', `<@${user.id}> peut de nouveau ouvrir des tickets.`);
     }
 
     if (sub === 'info') {
       const ban = db.getActiveTicketBan(user.id, interaction.guildId);
       if (!ban) {
-        return interaction.reply({ content: `✅ <@${user.id}> n'a pas de ban ticket actif.`, ephemeral: true });
+        return replyEmbed(interaction, 'success', 'Aucun ban actif', `<@${user.id}> peut ouvrir des tickets.`);
       }
 
-      return interaction.reply({
-        content:
-          `🚫 <@${user.id}> est banni des tickets ${formatBanExpiration(ban.expires_at)}.\n` +
-          `Banni par: <@${ban.banned_by}>\n` +
-          `Raison: ${ban.reason ?? 'Aucune raison indiquee'}`,
-        ephemeral: true,
-      });
+      return replyEmbed(interaction, 'warning', 'Ban ticket actif', `<@${user.id}> est actuellement bloque.`, [
+        embedField('Expiration', formatBanExpiration(ban.expires_at)),
+        embedField('Banni par', `<@${ban.banned_by}>`),
+        embedField('Raison', ban.reason ?? 'Aucune raison indiquee', false),
+      ]);
     }
   }
 };
