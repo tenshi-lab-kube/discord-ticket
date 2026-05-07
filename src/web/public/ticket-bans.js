@@ -130,3 +130,11 @@
     renderTicketBans();
   });
 })();
+
+(() => {
+  if (document.querySelector('script[data-embed-builder]')) return;
+  const script = document.createElement('script');
+  script.src = 'embed-messages.js';
+  script.dataset.embedBuilder = 'true';
+  document.body.appendChild(script);
+})();

@@ -4,6 +4,7 @@ const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
 const apiRouter = require('./web/api');
+const embedApiRouter = require('./web/embedApi');
 const db = require('./database');
 const { client } = require('./bot');
 const { getConfig } = require('./utils/config');
@@ -174,6 +175,7 @@ app.get('/auth/check', (req, res) => {
 
 // API routes (protected)
 app.use('/api', requireAuth, apiRouter);
+app.use('/api', requireAuth, embedApiRouter);
 
 // SPA fallback
 app.get('*', (req, res) => {
