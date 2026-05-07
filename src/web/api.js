@@ -106,6 +106,21 @@ router.get('/tickets', (req, res) => {
   res.json(tickets);
 });
 
+// GET ticket bans list
+router.get('/ticket-bans', (req, res) => {
+  const config = getConfig();
+  res.json(db.getTicketBans(config.guildId));
+});
+
+// DELETE active ticket ban
+router.delete('/ticket-bans/:userId', (req, res) => {
+  const config = getConfig();
+  const revokedBy = req.session?.user?.id || req.session?.user?.username || 'dashboard';
+  const result = db.revokeTicketBan(req.params.userId, config.guildId, revokedBy);
+  if (!result.changes) return res.status(404).json({ error: 'Aucun ban ticket actif pour cet utilisateur' });
+  res.json({ success: true });
+});
+
 // GET transcripts list
 router.get('/transcripts', (req, res) => {
   const config = getConfig();
