@@ -114,7 +114,7 @@ module.exports = {
     return db.prepare('UPDATE tickets SET category_id = ? WHERE channel_id = ?').run(categoryId, channelId);
   },
 
-  // Soft-delete: garde la ligne pour que MAX(ticket_number) reste cohérent
+  // Soft-delete: garde la ligne pour que MAX(ticket_number) reste cohÃ©rent
   softDeleteTicket(channelId) {
     return db.prepare("UPDATE tickets SET status = 'deleted' WHERE channel_id = ?").run(channelId);
   },
@@ -130,7 +130,7 @@ module.exports = {
     return db.prepare('SELECT * FROM panels WHERE guild_id = ?').get(guildId);
   },
 
-  // ── Compteur global ──────────────────────────────────────
+  // â”€â”€ Compteur global â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   incrementGuildTotal(guildId) {
     db.prepare(`
       INSERT INTO guild_stats (guild_id, total_created) VALUES (?, 1)
@@ -142,7 +142,7 @@ module.exports = {
     return db.prepare('SELECT * FROM guild_stats WHERE guild_id = ?').get(guildId);
   },
 
-  // ── Transcripts ──────────────────────────────────────────
+  // â”€â”€ Transcripts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   saveTranscript(data) {
     return db.prepare(`
       INSERT INTO transcripts (ticket_number, channel_name, guild_id, user_id, category_id, deleted_by, deleted_at, message_count, messages)
@@ -202,6 +202,30 @@ module.exports = {
       ORDER BY created_at DESC
       LIMIT 1
     `).get(userId, guildId, now);
+  },
+
+  getTicketBans(guildId) {
+    return db.prepare(`
+      SELECT *
+      FROM (
+        SELECT
+          *,
+          CASE
+            WHEN revoked_at IS NOT NULL THEN 'revoked'
+            WHEN expires_at IS NOT NULL AND expires_at <= ? THEN 'expired'
+            ELSE 'active'
+          END AS computed_status
+        FROM ticket_bans
+        WHERE guild_id = ?
+      )
+      ORDER BY
+        CASE computed_status
+          WHEN 'active' THEN 0
+          WHEN 'expired' THEN 1
+          ELSE 2
+        END,
+        created_at DESC
+    `).all(Date.now(), guildId);
   },
 
   revokeTicketBan(userId, guildId, revokedBy) {
