@@ -48,10 +48,23 @@ db.exec(`
     messages TEXT NOT NULL DEFAULT '[]'
   );
 
+  CREATE TABLE IF NOT EXISTS ticket_bans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    banned_by TEXT NOT NULL,
+    reason TEXT,
+    expires_at INTEGER,
+    created_at INTEGER NOT NULL,
+    revoked_at INTEGER,
+    revoked_by TEXT
+  );
+
   CREATE INDEX IF NOT EXISTS idx_tickets_guild ON tickets(guild_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id, guild_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(channel_id);
   CREATE INDEX IF NOT EXISTS idx_transcripts_guild ON transcripts(guild_id);
+  CREATE INDEX IF NOT EXISTS idx_ticket_bans_user ON ticket_bans(user_id, guild_id);
 `);
 
 module.exports = {
@@ -155,5 +168,51 @@ module.exports = {
 
   getTranscriptById(id) {
     return db.prepare('SELECT * FROM transcripts WHERE id = ?').get(id);
+  },
+
+  createTicketBan(data) {
+    const now = Date.now();
+    const transaction = db.transaction(() => {
+      db.prepare(`
+        UPDATE ticket_bans
+        SET revoked_at = ?, revoked_by = ?
+        WHERE guild_id = ?
+          AND user_id = ?
+          AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at > ?)
+      `).run(now, data.bannedBy, data.guildId, data.userId, now);
+
+      return db.prepare(`
+        INSERT INTO ticket_bans (guild_id, user_id, banned_by, reason, expires_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(data.guildId, data.userId, data.bannedBy, data.reason ?? null, data.expiresAt ?? null, now);
+    });
+
+    return transaction();
+  },
+
+  getActiveTicketBan(userId, guildId) {
+    const now = Date.now();
+    return db.prepare(`
+      SELECT * FROM ticket_bans
+      WHERE user_id = ?
+        AND guild_id = ?
+        AND revoked_at IS NULL
+        AND (expires_at IS NULL OR expires_at > ?)
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(userId, guildId, now);
+  },
+
+  revokeTicketBan(userId, guildId, revokedBy) {
+    const now = Date.now();
+    return db.prepare(`
+      UPDATE ticket_bans
+      SET revoked_at = ?, revoked_by = ?
+      WHERE user_id = ?
+        AND guild_id = ?
+        AND revoked_at IS NULL
+        AND (expires_at IS NULL OR expires_at > ?)
+    `).run(now, revokedBy, userId, guildId, now);
   },
 };

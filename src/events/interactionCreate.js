@@ -1,5 +1,25 @@
 const { getCommands } = require('../commands/index');
 const ticketHandler = require('../handlers/ticket');
+const db = require('../database');
+
+function buildTicketBanMessage(ban) {
+  const expiration = ban.expires_at
+    ? `jusqu'au <t:${Math.floor(ban.expires_at / 1000)}:F>`
+    : 'definitivement';
+
+  return `🚫 Tu es banni de la creation de tickets ${expiration}.\nRaison: ${ban.reason ?? 'Aucune raison indiquee'}`;
+}
+
+async function blockIfTicketBanned(interaction) {
+  const activeBan = db.getActiveTicketBan(interaction.user.id, interaction.guildId);
+  if (!activeBan) return false;
+
+  await interaction.reply({
+    content: buildTicketBanMessage(activeBan),
+    ephemeral: true,
+  });
+  return true;
+}
 
 module.exports = {
   name: 'interactionCreate',
@@ -20,6 +40,7 @@ module.exports = {
 
     if (interaction.isStringSelectMenu()) {
       if (interaction.customId === 'ticket_category_select') {
+        if (await blockIfTicketBanned(interaction)) return;
         await ticketHandler.handleCategorySelect(interaction).catch(console.error);
       }
       return;
@@ -49,7 +70,10 @@ module.exports = {
 
       // Boutons principaux du ticket → affichent la confirmation
       switch (parts[0]) {
-        case 'open_ticket_panel': await ticketHandler.handleOpenTicketPanel(interaction).catch(console.error); break;
+        case 'open_ticket_panel':
+          if (await blockIfTicketBanned(interaction)) return;
+          await ticketHandler.handleOpenTicketPanel(interaction).catch(console.error);
+          break;
         case 'ticket_claim':  await ticketHandler.handleClaim(interaction).catch(console.error);  break;
         case 'ticket_close':  await ticketHandler.handleClose(interaction).catch(console.error);  break;
         case 'ticket_reopen': await ticketHandler.handleReopen(interaction).catch(console.error); break;
