@@ -12,11 +12,10 @@
     <div class="login-box">
       <div class="login-logo">🎫</div>
       <h1>Ticket Bot</h1>
-      <p>Dashboard d'administration</p>
+      <p>Dashboard d'administration multi-serveurs</p>
       <form id="login-form">
-        <input type="password" id="password-input" placeholder="Mot de passe" required>
-        <button type="submit">Se connecter</button>
-        <p id="login-error" class="error hidden">Mot de passe incorrect</p>
+        <button type="submit">Se connecter avec Discord</button>
+        <p id="login-error" class="error hidden">Connexion refusee</p>
       </form>
     </div>
   </div>
@@ -28,12 +27,16 @@
         <span class="sidebar-logo">🎫</span>
         <span>Ticket Bot</span>
       </div>
+      <div class="guild-picker">
+        <label>Serveur
+          <select id="guild-select"></select>
+        </label>
+      </div>
       <nav>
         <button class="nav-btn active" data-page="overview">📊 Vue d'ensemble</button>
         <button class="nav-btn" data-page="panel">🎨 Panel</button>
         <button class="nav-btn" data-page="categories">📂 Catégories</button>
         <button class="nav-btn" data-page="tickets">🎫 Tickets</button>
-        <button class="nav-btn" data-page="ticket-bans">Bans tickets</button>
         <button class="nav-btn" data-page="transcripts">📜 Transcripts</button>
         <button class="nav-btn" data-page="settings">⚙️ Paramètres</button>
       </nav>
@@ -185,37 +188,6 @@
         </div>
       </section>
 
-      <!-- TICKET BANS -->
-      <section id="page-ticket-bans" class="page hidden">
-        <h2>Bans tickets</h2>
-        <div class="filters">
-          <select id="ban-filter-status">
-            <option value="">Tous les statuts</option>
-            <option value="active">Actifs</option>
-            <option value="expired">Expires</option>
-            <option value="revoked">Revoques</option>
-          </select>
-          <input type="text" id="ban-filter-user" placeholder="ID utilisateur..." style="max-width:220px">
-          <button class="btn-secondary" id="ban-filter-reset">Reinitialiser</button>
-        </div>
-        <div class="card">
-          <table id="ticket-bans-table">
-            <thead>
-              <tr>
-                <th>Utilisateur</th>
-                <th>Statut</th>
-                <th>Expiration</th>
-                <th>Raison</th>
-                <th>Banni par</th>
-                <th>Cree le</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="ticket-bans-body"><tr><td colspan="7" class="loading">Chargement...</td></tr></tbody>
-          </table>
-        </div>
-      </section>
-
       <!-- TRANSCRIPTS -->
       <section id="page-transcripts" class="page hidden">
         <h2>Transcripts</h2>
@@ -254,7 +226,10 @@
           <h3>Général</h3>
           <form id="settings-form">
             <label>ID du serveur (Guild ID)
-              <input type="text" name="guildId" placeholder="123456789012345678">
+              <input type="text" name="guildId" placeholder="123456789012345678" readonly>
+            </label>
+            <label>Nom affiche
+              <input type="text" name="guildName" placeholder="Nom du serveur">
             </label>
             <label>Salon de logs
               <select name="logChannelId">
@@ -394,6 +369,5 @@
   </div>
 
   <script src="app.js"></script>
-  <script src="ticket-bans.js"></script>
 </body>
 </html>

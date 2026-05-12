@@ -6,6 +6,9 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'ticke
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new Database(DB_PATH);
+db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
+db.pragma('foreign_keys = ON');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS tickets (
@@ -45,36 +48,67 @@ db.exec(`
     deleted_by TEXT NOT NULL,
     deleted_at INTEGER NOT NULL,
     message_count INTEGER NOT NULL DEFAULT 0,
-    messages TEXT NOT NULL DEFAULT '[]'
+    messages TEXT NOT NULL DEFAULT '[]',
+    partial INTEGER NOT NULL DEFAULT 0,
+    error TEXT
   );
 
-  CREATE TABLE IF NOT EXISTS ticket_bans (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    guild_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    banned_by TEXT NOT NULL,
-    reason TEXT,
-    expires_at INTEGER,
-    created_at INTEGER NOT NULL,
-    revoked_at INTEGER,
-    revoked_by TEXT
+  CREATE TABLE IF NOT EXISTS sessions (
+    sid TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL,
+    data TEXT NOT NULL
   );
 
   CREATE INDEX IF NOT EXISTS idx_tickets_guild ON tickets(guild_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id, guild_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(channel_id);
   CREATE INDEX IF NOT EXISTS idx_transcripts_guild ON transcripts(guild_id);
-  CREATE INDEX IF NOT EXISTS idx_ticket_bans_user ON ticket_bans(user_id, guild_id);
 `);
+
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_open_user_category
+      ON tickets(guild_id, user_id, category_id)
+      WHERE status = 'open'
+  `);
+} catch (error) {
+  console.warn('[db] Anti-double-ticket index skipped. Clean duplicate open tickets before enabling it.', error.message);
+}
+
+function columnExists(table, column) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().some(row => row.name === column);
+}
+
+if (!columnExists('transcripts', 'partial')) {
+  db.exec('ALTER TABLE transcripts ADD COLUMN partial INTEGER NOT NULL DEFAULT 0');
+}
+if (!columnExists('transcripts', 'error')) {
+  db.exec('ALTER TABLE transcripts ADD COLUMN error TEXT');
+}
+
+const createTicketTx = db.transaction((data) => {
+  const ticketNumber = db
+    .prepare('SELECT COALESCE(MAX(ticket_number), 0) + 1 AS next FROM tickets WHERE guild_id = ?')
+    .get(data.guildId).next;
+
+  db.prepare(`
+    INSERT INTO tickets (ticket_number, channel_id, guild_id, user_id, category_id, status, created_at)
+    VALUES (?, ?, ?, ?, ?, 'open', ?)
+  `).run(ticketNumber, data.channelId, data.guildId, data.userId, data.categoryId, Date.now());
+
+  db.prepare(`
+    INSERT INTO guild_stats (guild_id, total_created) VALUES (?, 1)
+    ON CONFLICT(guild_id) DO UPDATE SET total_created = total_created + 1
+  `).run(data.guildId);
+
+  return ticketNumber;
+});
 
 module.exports = {
   db,
 
   createTicket(data) {
-    return db.prepare(`
-      INSERT INTO tickets (ticket_number, channel_id, guild_id, user_id, category_id, status, created_at)
-      VALUES (?, ?, ?, ?, ?, 'open', ?)
-    `).run(data.ticketNumber, data.channelId, data.guildId, data.userId, data.categoryId, Date.now());
+    return createTicketTx(data);
   },
 
   getTicketByChannel(channelId) {
@@ -95,12 +129,12 @@ module.exports = {
 
   getAllTickets(guildId) {
     return db.prepare(
-      "SELECT * FROM tickets WHERE guild_id = ? AND status != 'deleted' ORDER BY created_at DESC"
+      "SELECT * FROM tickets WHERE guild_id = ? AND status != 'deleted' ORDER BY created_at DESC",
     ).all(guildId);
   },
 
   getNextTicketNumber(guildId) {
-    const row = db.prepare('SELECT MAX(ticket_number) as max FROM tickets WHERE guild_id = ?').get(guildId);
+    const row = db.prepare('SELECT MAX(ticket_number) AS max FROM tickets WHERE guild_id = ?').get(guildId);
     return (row?.max ?? 0) + 1;
   },
 
@@ -114,7 +148,6 @@ module.exports = {
     return db.prepare('UPDATE tickets SET category_id = ? WHERE channel_id = ?').run(categoryId, channelId);
   },
 
-  // Soft-delete: garde la ligne pour que MAX(ticket_number) reste cohÃ©rent
   softDeleteTicket(channelId) {
     return db.prepare("UPDATE tickets SET status = 'deleted' WHERE channel_id = ?").run(channelId);
   },
@@ -130,7 +163,6 @@ module.exports = {
     return db.prepare('SELECT * FROM panels WHERE guild_id = ?').get(guildId);
   },
 
-  // â”€â”€ Compteur global â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   incrementGuildTotal(guildId) {
     db.prepare(`
       INSERT INTO guild_stats (guild_id, total_created) VALUES (?, 1)
@@ -142,11 +174,13 @@ module.exports = {
     return db.prepare('SELECT * FROM guild_stats WHERE guild_id = ?').get(guildId);
   },
 
-  // â”€â”€ Transcripts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   saveTranscript(data) {
     return db.prepare(`
-      INSERT INTO transcripts (ticket_number, channel_name, guild_id, user_id, category_id, deleted_by, deleted_at, message_count, messages)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO transcripts (
+        ticket_number, channel_name, guild_id, user_id, category_id,
+        deleted_by, deleted_at, message_count, messages, partial, error
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       data.ticketNumber,
       data.channelName,
@@ -156,87 +190,26 @@ module.exports = {
       data.deletedBy,
       data.deletedAt,
       data.messageCount,
-      JSON.stringify(data.messages),
+      JSON.stringify(data.messages ?? []),
+      data.partial ? 1 : 0,
+      data.error ?? null,
     );
   },
 
   getTranscripts(guildId) {
-    return db.prepare(
-      'SELECT id, ticket_number, channel_name, user_id, category_id, deleted_by, deleted_at, message_count FROM transcripts WHERE guild_id = ? ORDER BY deleted_at DESC'
-    ).all(guildId);
+    return db.prepare(`
+      SELECT id, ticket_number, channel_name, user_id, category_id, deleted_by,
+             deleted_at, message_count, partial, error
+      FROM transcripts
+      WHERE guild_id = ?
+      ORDER BY deleted_at DESC
+    `).all(guildId);
   },
 
-  getTranscriptById(id) {
+  getTranscriptById(id, guildId = null) {
+    if (guildId) {
+      return db.prepare('SELECT * FROM transcripts WHERE id = ? AND guild_id = ?').get(id, guildId);
+    }
     return db.prepare('SELECT * FROM transcripts WHERE id = ?').get(id);
-  },
-
-  createTicketBan(data) {
-    const now = Date.now();
-    const transaction = db.transaction(() => {
-      db.prepare(`
-        UPDATE ticket_bans
-        SET revoked_at = ?, revoked_by = ?
-        WHERE guild_id = ?
-          AND user_id = ?
-          AND revoked_at IS NULL
-          AND (expires_at IS NULL OR expires_at > ?)
-      `).run(now, data.bannedBy, data.guildId, data.userId, now);
-
-      return db.prepare(`
-        INSERT INTO ticket_bans (guild_id, user_id, banned_by, reason, expires_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(data.guildId, data.userId, data.bannedBy, data.reason ?? null, data.expiresAt ?? null, now);
-    });
-
-    return transaction();
-  },
-
-  getActiveTicketBan(userId, guildId) {
-    const now = Date.now();
-    return db.prepare(`
-      SELECT * FROM ticket_bans
-      WHERE user_id = ?
-        AND guild_id = ?
-        AND revoked_at IS NULL
-        AND (expires_at IS NULL OR expires_at > ?)
-      ORDER BY created_at DESC
-      LIMIT 1
-    `).get(userId, guildId, now);
-  },
-
-  getTicketBans(guildId) {
-    return db.prepare(`
-      SELECT *
-      FROM (
-        SELECT
-          *,
-          CASE
-            WHEN revoked_at IS NOT NULL THEN 'revoked'
-            WHEN expires_at IS NOT NULL AND expires_at <= ? THEN 'expired'
-            ELSE 'active'
-          END AS computed_status
-        FROM ticket_bans
-        WHERE guild_id = ?
-      )
-      ORDER BY
-        CASE computed_status
-          WHEN 'active' THEN 0
-          WHEN 'expired' THEN 1
-          ELSE 2
-        END,
-        created_at DESC
-    `).all(Date.now(), guildId);
-  },
-
-  revokeTicketBan(userId, guildId, revokedBy) {
-    const now = Date.now();
-    return db.prepare(`
-      UPDATE ticket_bans
-      SET revoked_at = ?, revoked_by = ?
-      WHERE user_id = ?
-        AND guild_id = ?
-        AND revoked_at IS NULL
-        AND (expires_at IS NULL OR expires_at > ?)
-    `).run(now, revokedBy, userId, guildId, now);
   },
 };

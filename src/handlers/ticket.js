@@ -9,7 +9,8 @@ const {
   MessageFlags,
 } = require('discord.js');
 const db = require('../database');
-const { getConfig } = require('../utils/config');
+const { getGuildConfig } = require('../utils/config');
+const { enqueue } = require('../utils/queue');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -58,13 +59,19 @@ async function sendLog(guild, config, embed) {
   if (ch) await ch.send({ embeds: [embed] }).catch(() => {});
 }
 
-async function fetchAllMessages(channel) {
+async function fetchAllMessages(channel, maxMessages = 1000) {
   const messages = [];
   let before = null;
+  let partial = false;
+  let error = null;
   while (true) {
     const options = { limit: 100 };
     if (before) options.before = before;
-    const batch = await channel.messages.fetch(options).catch(() => null);
+    const batch = await channel.messages.fetch(options).catch(err => {
+      error = err.message;
+      partial = true;
+      return null;
+    });
     if (!batch || !batch.size) break;
     batch.forEach(msg => messages.push({
       id: msg.id,
@@ -83,15 +90,44 @@ async function fetchAllMessages(channel) {
       timestamp: msg.createdTimestamp,
     }));
     before = batch.last().id;
+    if (messages.length >= maxMessages) {
+      partial = true;
+      break;
+    }
     if (batch.size < 100) break;
   }
-  return messages.sort((a, b) => a.timestamp - b.timestamp);
+  return {
+    messages: messages.slice(0, maxMessages).sort((a, b) => a.timestamp - b.timestamp),
+    partial,
+    error,
+  };
+}
+
+async function pickTicketParent(guild, config, category) {
+  if (category.categoryId) {
+    const configured = guild.channels.cache.get(category.categoryId);
+    if (configured && configured.children?.cache?.size < 48) return configured;
+  }
+
+  const prefix = config.tickets?.archiveCategoryPrefix || 'Tickets';
+  const candidates = guild.channels.cache
+    .filter(ch => ch.type === ChannelType.GuildCategory && ch.name.toLowerCase().startsWith(prefix.toLowerCase()))
+    .sort((a, b) => a.position - b.position);
+
+  const available = candidates.find(ch => ch.children?.cache?.size < 48);
+  if (available) return available;
+
+  return guild.channels.create({
+    name: `${prefix} ${candidates.size + 1}`,
+    type: ChannelType.GuildCategory,
+  });
 }
 
 // ── Bouton du panel → menu éphémère dynamique ─────────────────────────────────
 
 async function handleOpenTicketPanel(interaction) {
-  const config = getConfig();
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
   const member = interaction.member;
 
   // Filtrer les catégories selon le rôle requis
@@ -126,7 +162,8 @@ async function handleOpenTicketPanel(interaction) {
 // ── Création de ticket ────────────────────────────────────────────────────────
 
 async function handleCategorySelect(interaction) {
-  const config = getConfig();
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
   const categoryId = interaction.values[0];
   const category = config.ticketCategories.find(c => c.id === categoryId);
   if (!category) return interaction.reply({ content: '❌ Catégorie introuvable.', flags: MessageFlags.Ephemeral });
@@ -170,7 +207,26 @@ async function handleCategorySelect(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
 
+  return enqueue(`ticket-create:${interaction.guildId}:${interaction.user.id}`, async () => {
   const guild = interaction.guild;
+
+  if (globalMax) {
+    const allOpen = db.getOpenTicketsByUserGlobal(interaction.user.id, interaction.guildId);
+    if (allOpen.length >= globalLimit) {
+      return interaction.editReply({
+        content: `❌ Tu as déjà **${allOpen.length}** ticket(s) ouvert(s) (limite globale : ${globalLimit}).\nTicket ouvert : <#${allOpen[0].channel_id}>`,
+      });
+    }
+  } else {
+    const existing = db.getOpenTicketsByUser(interaction.user.id, interaction.guildId, categoryId);
+    const catLimit = category.maxTickets ?? globalLimit;
+    if (existing.length >= catLimit) {
+      return interaction.editReply({
+        content: `❌ Tu as déjà un ticket ouvert dans cette catégorie : <#${existing[0].channel_id}>`,
+      });
+    }
+  }
+
   const ticketNumber = db.getNextTicketNumber(guild.id);
 
   const safeUsername = interaction.user.username
@@ -203,8 +259,7 @@ async function handleCategorySelect(interaction) {
     });
   }
 
-  let discordCategory = null;
-  if (category.categoryId) discordCategory = guild.channels.cache.get(category.categoryId);
+  const discordCategory = await pickTicketParent(guild, config, category);
 
   const channel = await guild.channels.create({
     name: channelName,
@@ -214,8 +269,12 @@ async function handleCategorySelect(interaction) {
     topic: `Ticket de ${interaction.user.tag} | Catégorie: ${category.name}`,
   });
 
-  db.createTicket({ ticketNumber, channelId: channel.id, guildId: guild.id, userId: interaction.user.id, categoryId });
-  db.incrementGuildTotal(guild.id);
+  const storedTicketNumber = db.createTicket({
+    channelId: channel.id,
+    guildId: guild.id,
+    userId: interaction.user.id,
+    categoryId,
+  });
 
   const openEmbed = new EmbedBuilder()
     .setColor(config.panel?.color ?? '#5865F2')
@@ -224,7 +283,7 @@ async function handleCategorySelect(interaction) {
       `**Catégorie:** ${category.emoji} ${category.name}\n` +
       `**Créateur:** <@${interaction.user.id}>`
     )
-    .setFooter({ text: `Ticket #${String(ticketNumber).padStart(4, '0')}` })
+    .setFooter({ text: `Ticket #${String(storedTicketNumber).padStart(4, '0')}` })
     .setTimestamp();
 
   const msg = await channel.send({
@@ -245,12 +304,15 @@ async function handleCategorySelect(interaction) {
   );
 
   await interaction.editReply({ content: `✅ Ton ticket a été créé : <#${channel.id}>` });
+  });
 }
 
 // ── Confirmations initiales ───────────────────────────────────────────────────
 
+
 async function handleClaim(interaction) {
-  const config = getConfig();
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
   if (!isStaff(interaction.member, config)) {
     return interaction.reply({ content: '❌ Réservé au staff.', flags: MessageFlags.Ephemeral });
   }
@@ -267,7 +329,8 @@ async function handleClaim(interaction) {
 }
 
 async function handleClose(interaction) {
-  const config = getConfig();
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
   const ticket = db.getTicketByChannel(interaction.channelId);
   if (!ticket) return interaction.reply({ content: '❌ Ticket introuvable.', flags: MessageFlags.Ephemeral });
   const isOwner = ticket.user_id === interaction.user.id;
@@ -282,7 +345,8 @@ async function handleClose(interaction) {
 }
 
 async function handleReopen(interaction) {
-  const config = getConfig();
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
   if (!isStaff(interaction.member, config)) {
     return interaction.reply({ content: '❌ Réservé au staff.', flags: MessageFlags.Ephemeral });
   }
@@ -294,7 +358,8 @@ async function handleReopen(interaction) {
 }
 
 async function handleDelete(interaction) {
-  const config = getConfig();
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
   if (!isStaff(interaction.member, config)) {
     return interaction.reply({ content: '❌ Réservé au staff.', flags: MessageFlags.Ephemeral });
   }
@@ -308,7 +373,8 @@ async function handleDelete(interaction) {
 // ── Exécutions après confirmation ─────────────────────────────────────────────
 
 async function executeClaim(interaction, originalMessageId) {
-  const config = getConfig();
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.update({ content: 'Serveur non configure.', components: [] });
   const ticket = db.getTicketByChannel(interaction.channelId);
   if (!ticket) return interaction.update({ content: '❌ Ticket introuvable.', components: [] });
 
@@ -333,7 +399,8 @@ async function executeClaim(interaction, originalMessageId) {
 }
 
 async function executeClose(interaction, originalMessageId) {
-  const config = getConfig();
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.update({ content: 'Serveur non configure.', components: [] });
   const ticket = db.getTicketByChannel(interaction.channelId);
   if (!ticket) return interaction.update({ content: '❌ Ticket introuvable.', components: [] });
 
@@ -363,7 +430,8 @@ async function executeClose(interaction, originalMessageId) {
 }
 
 async function executeReopen(interaction, originalMessageId) {
-  const config = getConfig();
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.update({ content: 'Serveur non configure.', components: [] });
   const ticket = db.getTicketByChannel(interaction.channelId);
   if (!ticket) return interaction.update({ content: '❌ Ticket introuvable.', components: [] });
 
@@ -388,12 +456,17 @@ async function executeReopen(interaction, originalMessageId) {
 }
 
 async function executeDelete(interaction, originalMessageId) {
-  const config = getConfig();
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.update({ content: 'Serveur non configure.', components: [] });
   const ticket = db.getTicketByChannel(interaction.channelId);
 
   await interaction.update({ content: '📋 Sauvegarde du transcript… suppression dans 5 secondes.', components: [] });
 
-  const messages = await fetchAllMessages(interaction.channel);
+  const transcript = await fetchAllMessages(
+    interaction.channel,
+    Number(config.tickets?.maxTranscriptMessages ?? 1000),
+  );
+  const messages = transcript.messages;
 
   if (ticket) {
     db.saveTranscript({
@@ -404,8 +477,10 @@ async function executeDelete(interaction, originalMessageId) {
       categoryId: ticket.category_id,
       deletedBy: interaction.user.id,
       deletedAt: Date.now(),
-      messageCount: messages.length,
-      messages,
+      messageCount: transcript.messages.length,
+      messages: transcript.messages,
+      partial: transcript.partial,
+      error: transcript.error,
     });
     db.softDeleteTicket(interaction.channelId);
   }

@@ -1,54 +1,54 @@
 {
-  "guildId": "YOUR_GUILD_ID",
-  "logChannelId": "",
-  "staffRoles": [],
-  "adminRoles": [],
-  "ticketCategories": [
-    {
-      "id": "general",
-      "name": "Aide générale",
-      "emoji": "🆘",
-      "description": "Le staff peut t'aider !",
-      "categoryId": "",
-      "requiredRole": "",
-      "supportRoles": [],
-      "maxTickets": 1
+  "version": 2,
+  "guilds": {
+    "YOUR_EXISTING_GUILD_ID": {
+      "guildId": "YOUR_EXISTING_GUILD_ID",
+      "name": "Serveur principal",
+      "enabled": true,
+      "logChannelId": "",
+      "staffRoles": [],
+      "adminRoles": [],
+      "ticketCategories": [
+        {
+          "id": "general",
+          "name": "Aide generale",
+          "emoji": "",
+          "description": "Le staff peut t'aider.",
+          "categoryId": "",
+          "requiredRole": "",
+          "supportRoles": [],
+          "maxTickets": 1
+        }
+      ],
+      "panel": {
+        "title": "OUVRIR UN TICKET",
+        "description": "Tu as besoin d'aide ou tu as une requete a effectuer ?\n\nClique sur le bouton ci-dessous.",
+        "color": "#5865F2",
+        "buttonLabel": "Ouvrir un ticket",
+        "placeholder": "Comment pouvons-nous t'aider ?",
+        "thumbnail": "",
+        "footer": ""
+      },
+      "tickets": {
+        "nameFormat": "{username}-{number}",
+        "openMessage": "Ton ticket a ete cree.\nFournis-nous toute information supplementaire utile.",
+        "closedCategoryId": "",
+        "archiveCategoryPrefix": "Tickets",
+        "maxPerUser": 1,
+        "globalMax": false,
+        "maxTranscriptMessages": 1000
+      }
     },
-    {
-      "id": "giveaway",
-      "name": "Giveaway",
-      "emoji": "🎁",
-      "description": "Récupère ton cadeau !",
-      "categoryId": "",
-      "requiredRole": "",
-      "supportRoles": [],
-      "maxTickets": 1
-    },
-    {
-      "id": "event",
-      "name": "Événement",
-      "emoji": "📅",
-      "description": "Participe aux évènements",
-      "categoryId": "",
-      "requiredRole": "",
-      "supportRoles": [],
-      "maxTickets": 1
+    "NEW_GUILD_ID": {
+      "guildId": "NEW_GUILD_ID",
+      "name": "Nouveau serveur",
+      "enabled": false,
+      "logChannelId": "",
+      "staffRoles": [],
+      "adminRoles": [],
+      "ticketCategories": [],
+      "panel": {},
+      "tickets": {}
     }
-  ],
-  "panel": {
-    "title": "OUVRIR UN TICKET",
-    "description": "Tu as besoin d'aide ou tu à une requête à effectuer ?\n\nClique sur le bouton ci-dessous ! ⬇️",
-    "color": "#5865F2",
-    "buttonLabel": "Ouvrir un ticket",
-    "placeholder": "Comment pouvons-nous t'aider ?",
-    "thumbnail": "",
-    "footer": ""
-  },
-  "tickets": {
-    "nameFormat": "{username}-{number}",
-    "openMessage": "Ton ticket a été créé.\nFournis-nous toute information supplémentaire que tu juges utile pour nous aider à répondre plus rapidement.",
-    "closedCategoryId": "",
-    "maxPerUser": 1,
-    "globalMax": false
   }
 }

@@ -7,6 +7,7 @@ data/
 
 # Dependencies
 node_modules/
+.tmp-paramiko/
 
 # Logs
 *.log

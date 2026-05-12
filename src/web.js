@@ -4,180 +4,163 @@ const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
 const apiRouter = require('./web/api');
-const embedApiRouter = require('./web/embedApi');
-const db = require('./database');
-const { client } = require('./bot');
-const { getConfig } = require('./utils/config');
-const { observeHttp, renderMetrics, observabilityPage, getObservabilitySnapshot } = require('./observability');
+const { db } = require('./database');
 
 const app = express();
-let oidcDiscoveryCache = null;
 
+class SqliteSessionStore extends session.Store {
+  get(sid, cb) {
+    try {
+      const row = db.prepare('SELECT data FROM sessions WHERE sid = ? AND expires_at > ?').get(sid, Date.now());
+      cb(null, row ? JSON.parse(row.data) : null);
+    } catch (err) {
+      cb(err);
+    }
+  }
+
+  set(sid, sess, cb) {
+    try {
+      const maxAge = sess.cookie?.originalMaxAge ?? 1000 * 60 * 60 * 8;
+      db.prepare(`
+        INSERT INTO sessions (sid, expires_at, data) VALUES (?, ?, ?)
+        ON CONFLICT(sid) DO UPDATE SET expires_at = excluded.expires_at, data = excluded.data
+      `).run(sid, Date.now() + maxAge, JSON.stringify(sess));
+      cb();
+    } catch (err) {
+      cb(err);
+    }
+  }
+
+  destroy(sid, cb) {
+    try {
+      db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid);
+      cb();
+    } catch (err) {
+      cb(err);
+    }
+  }
+}
+
+app.set('trust proxy', 1);
 app.use(cors({ origin: false }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(observeHttp);
 
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'changeme-secret',
+  store: new SqliteSessionStore(),
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 1000 * 60 * 60 * 8, sameSite: 'lax' },
+  cookie: {
+    maxAge: 1000 * 60 * 60 * 8,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  },
 }));
 
-const observabilityDeps = { db, getConfig, client };
-
-function oidcEnabled() {
-  return !!(process.env.OIDC_ISSUER && process.env.OIDC_CLIENT_ID && process.env.OIDC_CLIENT_SECRET);
+function getPublicBaseUrl(req) {
+  return process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
 }
 
-function getOidcRedirectUri(req) {
-  if (process.env.OIDC_REDIRECT_URI) return process.env.OIDC_REDIRECT_URI;
-  const proto = req.headers['x-forwarded-proto'] || req.protocol;
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
-  return `${proto}://${host}/auth/oidc/callback`;
+function getDiscordOAuthConfig(req) {
+  const clientId = process.env.DISCORD_OAUTH_CLIENT_ID || process.env.CLIENT_ID;
+  const clientSecret = process.env.DISCORD_OAUTH_CLIENT_SECRET;
+  const redirectUri = process.env.DISCORD_OAUTH_REDIRECT_URI || `${getPublicBaseUrl(req)}/auth/discord/callback`;
+  return { clientId, clientSecret, redirectUri };
 }
 
-async function getOidcDiscovery() {
-  if (oidcDiscoveryCache) return oidcDiscoveryCache;
-  const issuer = process.env.OIDC_ISSUER.replace(/\/$/, '');
-  const res = await fetch(`${issuer}/.well-known/openid-configuration`);
-  if (!res.ok) throw new Error(`OIDC discovery failed: ${res.status}`);
-  oidcDiscoveryCache = await res.json();
-  return oidcDiscoveryCache;
-}
-
-app.get('/', (req, res, next) => {
-  if (!req.session?.authenticated && oidcEnabled() && process.env.OIDC_AUTO_LOGIN !== 'false') {
-    return res.redirect('/auth/oidc/login');
-  }
-  next();
+app.get('/healthz', (req, res) => {
+  res.json({ ok: true });
 });
-
-// Serve static files
-app.use(express.static(path.join(__dirname, 'web', 'public')));
-
-// Auth middleware for API
-function requireAuth(req, res, next) {
-  if (req.session?.authenticated) return next();
-  res.status(401).json({ error: 'Non authentifie' });
-}
 
 app.get('/metrics', (req, res) => {
-  res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-  res.send(renderMetrics(observabilityDeps));
+  const memory = process.memoryUsage();
+  res.type('text/plain').send([
+    '# HELP discord_ticket_up Bot web process health.',
+    '# TYPE discord_ticket_up gauge',
+    'discord_ticket_up 1',
+    '# HELP discord_ticket_process_memory_bytes Node.js process memory usage.',
+    '# TYPE discord_ticket_process_memory_bytes gauge',
+    `discord_ticket_process_memory_bytes{type="rss"} ${memory.rss}`,
+    `discord_ticket_process_memory_bytes{type="heap_used"} ${memory.heapUsed}`,
+    '# HELP discord_ticket_uptime_seconds Node.js process uptime.',
+    '# TYPE discord_ticket_uptime_seconds gauge',
+    `discord_ticket_uptime_seconds ${process.uptime()}`,
+    '',
+  ].join('\n'));
 });
 
-app.get('/observability', requireAuth, (req, res) => {
-  res.set('Content-Type', 'text/html; charset=utf-8');
-  res.send(observabilityPage());
-});
+app.get('/auth/discord', (req, res) => {
+  const { clientId, redirectUri } = getDiscordOAuthConfig(req);
+  if (!clientId) return res.status(500).send('DISCORD_OAUTH_CLIENT_ID ou CLIENT_ID manquant');
 
-app.get('/observability/data', requireAuth, (req, res) => {
-  res.json(getObservabilitySnapshot(observabilityDeps));
-});
-
-app.get('/auth/methods', (req, res) => {
-  res.json({
-    password: !!process.env.WEB_PASSWORD,
-    oidc: oidcEnabled(),
+  const state = crypto.randomBytes(16).toString('hex');
+  req.session.oauthState = state;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'identify',
+    state,
   });
+  res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
 });
 
-app.get('/auth/oidc/login', async (req, res) => {
-  if (!oidcEnabled()) return res.status(404).send('OIDC disabled');
+app.get('/auth/discord/callback', async (req, res) => {
+  const { code, state } = req.query;
+  const { clientId, clientSecret, redirectUri } = getDiscordOAuthConfig(req);
+  if (!code || !state || state !== req.session.oauthState) return res.status(400).send('Etat OAuth invalide');
+  if (!clientId || !clientSecret) return res.status(500).send('Configuration OAuth incomplete');
 
   try {
-    const discovery = await getOidcDiscovery();
-    const state = crypto.randomBytes(24).toString('hex');
-    req.session.oidcState = state;
-
-    const params = new URLSearchParams({
-      client_id: process.env.OIDC_CLIENT_ID,
-      redirect_uri: getOidcRedirectUri(req),
-      response_type: 'code',
-      scope: process.env.OIDC_SCOPES || 'openid profile email',
-      state,
-    });
-
-    res.redirect(`${discovery.authorization_endpoint}?${params.toString()}`);
-  } catch (err) {
-    console.error('[OIDC] Login failed:', err.message);
-    res.status(500).send('OIDC login failed');
-  }
-});
-
-app.get('/auth/oidc/callback', async (req, res) => {
-  if (!oidcEnabled()) return res.status(404).send('OIDC disabled');
-  if (!req.query.code || req.query.state !== req.session?.oidcState) {
-    return res.status(400).send('Invalid OIDC state');
-  }
-
-  try {
-    const discovery = await getOidcDiscovery();
-    const tokenBody = new URLSearchParams({
-      grant_type: 'authorization_code',
-      code: req.query.code,
-      redirect_uri: getOidcRedirectUri(req),
-      client_id: process.env.OIDC_CLIENT_ID,
-      client_secret: process.env.OIDC_CLIENT_SECRET,
-    });
-
-    const tokenRes = await fetch(discovery.token_endpoint, {
+    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: tokenBody,
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+      }),
     });
-    const tokens = await tokenRes.json().catch(() => ({}));
-    if (!tokenRes.ok) throw new Error(tokens.error_description || tokens.error || `token ${tokenRes.status}`);
+    if (!tokenRes.ok) throw new Error('Echange OAuth refuse');
+    const token = await tokenRes.json();
 
-    let user = {};
-    if (tokens.access_token && discovery.userinfo_endpoint) {
-      const userRes = await fetch(discovery.userinfo_endpoint, {
-        headers: { Authorization: `Bearer ${tokens.access_token}` },
-      });
-      if (userRes.ok) user = await userRes.json();
-    }
+    const userRes = await fetch('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${token.access_token}` },
+    });
+    if (!userRes.ok) throw new Error('Profil Discord inaccessible');
+    const user = await userRes.json();
 
-    req.session.authenticated = true;
     req.session.user = {
-      sub: user.sub,
-      email: user.email,
-      name: user.name || user.preferred_username || user.email,
+      id: user.id,
+      username: user.username,
+      globalName: user.global_name,
+      avatar: user.avatar,
     };
-    delete req.session.oidcState;
+    delete req.session.oauthState;
     res.redirect('/');
   } catch (err) {
-    console.error('[OIDC] Callback failed:', err.message);
-    res.status(401).send('OIDC callback failed');
+    res.status(401).send(err.message);
   }
-});
-
-// Login
-app.post('/auth/login', (req, res) => {
-  const { password } = req.body;
-  if (password === process.env.WEB_PASSWORD) {
-    req.session.authenticated = true;
-    return res.json({ success: true });
-  }
-  res.status(401).json({ error: 'Mot de passe incorrect' });
 });
 
 app.post('/auth/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.json({ success: true });
-  });
+  req.session.destroy(() => res.json({ success: true }));
 });
 
 app.get('/auth/check', (req, res) => {
-  res.json({ authenticated: !!req.session?.authenticated, user: req.session?.user || null });
+  res.json({ authenticated: !!req.session?.user, user: req.session?.user ?? null });
 });
 
-// API routes (protected)
-app.use('/api', requireAuth, apiRouter);
-app.use('/api', requireAuth, embedApiRouter);
+function requireAuth(req, res, next) {
+  if (req.session?.user) return next();
+  res.status(401).json({ error: 'Non authentifie' });
+}
 
-// SPA fallback
+app.use(express.static(path.join(__dirname, 'web', 'public')));
+app.use('/api', requireAuth, apiRouter);
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'web', 'public', 'index.html'));
 });

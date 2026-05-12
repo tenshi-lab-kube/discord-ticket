@@ -1,29 +1,28 @@
 const { getCommands } = require('../commands/index');
 const ticketHandler = require('../handlers/ticket');
-const db = require('../database');
+const { getGuildConfig } = require('../utils/config');
 
-function buildTicketBanMessage(ban) {
-  const expiration = ban.expires_at
-    ? `jusqu'au <t:${Math.floor(ban.expires_at / 1000)}:F>`
-    : 'definitivement';
+async function rejectUnconfigured(interaction) {
+  if (!interaction.guildId) return true;
+  const config = getGuildConfig(interaction.guildId);
+  if (config) return false;
 
-  return `🚫 Tu es banni de la creation de tickets ${expiration}.\nRaison: ${ban.reason ?? 'Aucune raison indiquee'}`;
-}
-
-async function blockIfTicketBanned(interaction) {
-  const activeBan = db.getActiveTicketBan(interaction.user.id, interaction.guildId);
-  if (!activeBan) return false;
-
-  await interaction.reply({
-    content: buildTicketBanMessage(activeBan),
-    ephemeral: true,
-  });
+  const message = 'Ce serveur Discord n est pas encore configure pour le bot ticket.';
+  if (interaction.isRepliable()) {
+    if (interaction.deferred || interaction.replied) {
+      await interaction.followUp({ content: message, ephemeral: true }).catch(() => {});
+    } else {
+      await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+    }
+  }
   return true;
 }
 
 module.exports = {
   name: 'interactionCreate',
   async execute(interaction) {
+    if (await rejectUnconfigured(interaction)) return;
+
     if (interaction.isAutocomplete()) {
       const commands = getCommands();
       const cmd = commands.find(c => c.data.name === interaction.commandName);
@@ -40,7 +39,6 @@ module.exports = {
 
     if (interaction.isStringSelectMenu()) {
       if (interaction.customId === 'ticket_category_select') {
-        if (await blockIfTicketBanned(interaction)) return;
         await ticketHandler.handleCategorySelect(interaction).catch(console.error);
       }
       return;
@@ -70,10 +68,7 @@ module.exports = {
 
       // Boutons principaux du ticket → affichent la confirmation
       switch (parts[0]) {
-        case 'open_ticket_panel':
-          if (await blockIfTicketBanned(interaction)) return;
-          await ticketHandler.handleOpenTicketPanel(interaction).catch(console.error);
-          break;
+        case 'open_ticket_panel': await ticketHandler.handleOpenTicketPanel(interaction).catch(console.error); break;
         case 'ticket_claim':  await ticketHandler.handleClaim(interaction).catch(console.error);  break;
         case 'ticket_close':  await ticketHandler.handleClose(interaction).catch(console.error);  break;
         case 'ticket_reopen': await ticketHandler.handleReopen(interaction).catch(console.error); break;

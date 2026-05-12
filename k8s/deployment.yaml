@@ -8,7 +8,10 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: discord-ticket
@@ -16,11 +19,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: discord-ticket
-      annotations:
-        app.kubernetes.io/rollout-revision: "embed-builder-2026-05-07"
     spec:
-      securityContext:
-        fsGroup: 1000
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -43,7 +42,6 @@ spec:
               if [ ! -s /runtime/config.json ]; then
                 cp /seed/config.json /runtime/config.json
               fi
-              chown -R 1000:1000 /runtime
           volumeMounts:
             - name: runtime
               mountPath: /runtime
@@ -60,32 +58,39 @@ spec:
           env:
             - name: WEB_PORT
               value: "3000"
+            - name: NODE_ENV
+              value: production
             - name: CONFIG_PATH
               value: /app/runtime/config.json
             - name: DB_PATH
               value: /app/runtime/data/tickets.db
+            - name: PUBLIC_URL
+              value: https://tickets.tenshi-lab.fr
           envFrom:
             - secretRef:
                 name: discord-ticket-env
           readinessProbe:
             httpGet:
-              path: /auth/check
+              path: /healthz
               port: http
-            initialDelaySeconds: 10
+            initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           livenessProbe:
             httpGet:
-              path: /auth/check
+              path: /healthz
               port: http
             initialDelaySeconds: 30
             periodSeconds: 30
+            timeoutSeconds: 5
           resources:
             requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: 500m
+              cpu: 250m
               memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
           volumeMounts:
             - name: runtime
               mountPath: /app/runtime

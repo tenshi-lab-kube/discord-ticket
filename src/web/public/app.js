@@ -3,11 +3,14 @@ let cfg = {};
 let channels = [];
 let roles = [];
 let tickets = [];
+let guilds = [];
+let selectedGuildId = localStorage.getItem('selectedGuildId') || '';
 
 // Utilities
 const $ = id => document.getElementById(id);
 const api = async (method, path, body) => {
-  const res = await fetch('/api' + path, {
+  const scopedPath = path === '/guilds' ? path : `/${selectedGuildId}${path}`;
+  const res = await fetch('/api' + scopedPath, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
@@ -45,19 +48,7 @@ function fmtDate(ts) {
 // ──────────── LOGIN ────────────
 $('login-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const pw = $('password-input').value;
-  const res = await fetch('/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: pw }),
-  });
-  if (res.ok) {
-    $('login-screen').classList.add('hidden');
-    $('dashboard').classList.remove('hidden');
-    await initDashboard();
-  } else {
-    $('login-error').classList.remove('hidden');
-  }
+  window.location.href = '/auth/discord';
 });
 
 $('logout-btn').addEventListener('click', async () => {
@@ -67,6 +58,18 @@ $('logout-btn').addEventListener('click', async () => {
 
 // ──────────── INIT ────────────
 async function initDashboard() {
+  guilds = await api('GET', '/guilds');
+  if (!guilds.length) {
+    $('dashboard').classList.add('hidden');
+    $('login-screen').classList.remove('hidden');
+    $('login-error').textContent = 'Aucun serveur administrable avec ce compte Discord.';
+    $('login-error').classList.remove('hidden');
+    return;
+  }
+  if (!guilds.some(g => g.guildId === selectedGuildId)) selectedGuildId = guilds[0].guildId;
+  localStorage.setItem('selectedGuildId', selectedGuildId);
+  populateGuildSelect();
+
   [cfg, channels, roles] = await Promise.all([
     api('GET', '/config'),
     api('GET', '/guild/channels').catch(() => []),
@@ -79,6 +82,20 @@ async function initDashboard() {
   loadSettings();
   loadTicketSettings();
 }
+
+function populateGuildSelect() {
+  const select = $('guild-select');
+  if (!select) return;
+  select.innerHTML = guilds.map(g => `<option value="${g.guildId}">${g.name || g.discordName || g.guildId}</option>`).join('');
+  select.value = selectedGuildId;
+}
+
+$('guild-select')?.addEventListener('change', async e => {
+  selectedGuildId = e.target.value;
+  localStorage.setItem('selectedGuildId', selectedGuildId);
+  await initDashboard();
+  showPage('overview');
+});
 
 // ──────────── NAV ────────────
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -419,6 +436,7 @@ $('ticket-filter-category').addEventListener('change', renderTickets);
 function loadSettings() {
   const form = $('settings-form');
   form.guildId.value = cfg.guildId ?? '';
+  if (form.guildName) form.guildName.value = cfg.name ?? '';
   form.staffRoles.value = (cfg.staffRoles ?? []).join(',');
   form.adminRoles.value = (cfg.adminRoles ?? []).join(',');
   if (cfg.logChannelId) {
@@ -431,7 +449,7 @@ $('settings-form').addEventListener('submit', async e => {
   e.preventDefault();
   const form = $('settings-form');
   const patch = {
-    guildId: form.guildId.value,
+    name: form.guildName?.value || cfg.name || '',
     logChannelId: form.querySelector('select[name="logChannelId"]').value,
     staffRoles: form.staffRoles.value ? form.staffRoles.value.split(',').map(s => s.trim()).filter(Boolean) : [],
     adminRoles: form.adminRoles.value ? form.adminRoles.value.split(',').map(s => s.trim()).filter(Boolean) : [],
