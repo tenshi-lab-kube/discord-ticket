@@ -1,6 +1,5 @@
-const { REST, Routes } = require('discord.js');
-const { getCommands } = require('../commands/index');
-const { listConfiguredGuilds } = require('../utils/config');
+const { getGuildConfig, listConfiguredGuilds, saveGuildConfig } = require('../utils/config');
+const { registerGuildCommands } = require('../utils/commands');
 
 module.exports = {
   name: 'ready',
@@ -8,8 +7,17 @@ module.exports = {
   async execute(client) {
     console.log(`[Bot] Connecte en tant que ${client.user.tag}`);
 
-    const commands = getCommands();
-    const rest = new REST().setToken(process.env.BOT_TOKEN);
+    for (const [, guild] of client.guilds.cache) {
+      if (!getGuildConfig(guild.id, { requireEnabled: false })) {
+        saveGuildConfig(guild.id, {
+          guildId: guild.id,
+          name: guild.name,
+          enabled: true,
+        });
+        console.log(`[Bot] Serveur ajoute a la configuration: ${guild.name} (${guild.id}).`);
+      }
+    }
+
     const guilds = listConfiguredGuilds({ enabledOnly: true });
 
     if (!guilds.length) {
@@ -19,10 +27,7 @@ module.exports = {
 
     for (const guild of guilds) {
       try {
-        await rest.put(
-          Routes.applicationGuildCommands(process.env.CLIENT_ID, guild.guildId),
-          { body: commands.map(c => c.data.toJSON()) },
-        );
+        await registerGuildCommands(guild.guildId);
         console.log(`[Bot] Slash commands enregistrees pour ${guild.name || guild.guildId}.`);
       } catch (err) {
         console.error(`[Bot] Erreur enregistrement commands pour ${guild.guildId}:`, err);
