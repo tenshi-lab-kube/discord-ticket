@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { getConfig, getGuildConfig, listConfiguredGuilds, saveGuildConfig } = require('../utils/config');
+const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, REST, Routes } = require('discord.js');
+const { DEFAULT_GUILD_CONFIG, getGuildConfig, listConfiguredGuilds, saveGuildConfig } = require('../utils/config');
+const { getCommands } = require('../commands/index');
 const { buildPanelMessage } = require('../utils/panel');
 const db = require('../database');
 const { client } = require('../bot');
@@ -15,8 +16,15 @@ function isGuildAdmin(member, guildConfig) {
 
 async function getAuthorizedGuilds(userId) {
   const result = [];
-  for (const configured of listConfiguredGuilds()) {
-    const guild = client.guilds.cache.get(configured.guildId);
+  const configuredById = new Map(listConfiguredGuilds().map(configured => [configured.guildId, configured]));
+
+  for (const [, guild] of client.guilds.cache) {
+    const configured = configuredById.get(guild.id) ?? {
+      ...DEFAULT_GUILD_CONFIG,
+      guildId: guild.id,
+      name: guild.name,
+      enabled: false,
+    };
     if (!guild) continue;
     try {
       const member = await guild.members.fetch(userId);
@@ -34,6 +42,15 @@ async function getAuthorizedGuilds(userId) {
     }
   }
   return result;
+}
+
+async function registerGuildCommands(guildId) {
+  const commands = getCommands();
+  const rest = new REST().setToken(process.env.BOT_TOKEN);
+  await rest.put(
+    Routes.applicationGuildCommands(process.env.CLIENT_ID, guildId),
+    { body: commands.map(command => command.data.toJSON()) },
+  );
 }
 
 async function pickTicketParent(guild, guildConfig, category) {
@@ -61,15 +78,30 @@ router.get('/guilds', async (req, res) => {
 });
 
 router.param('guildId', async (req, res, next, guildId) => {
-  const guildConfig = getGuildConfig(guildId, { requireEnabled: false });
+  let guildConfig = getGuildConfig(guildId, { requireEnabled: false });
   const guild = client.guilds.cache.get(guildId);
-  if (!guildConfig || !guild) return res.status(404).json({ error: 'Serveur introuvable ou non configure' });
+  if (!guild) return res.status(404).json({ error: 'Serveur introuvable' });
 
   try {
     const member = await guild.members.fetch(req.session.user.id);
-    if (!isGuildAdmin(member, guildConfig)) {
+    const effectiveConfig = guildConfig ?? {
+      ...DEFAULT_GUILD_CONFIG,
+      guildId,
+      name: guild.name,
+      enabled: true,
+    };
+
+    if (!isGuildAdmin(member, effectiveConfig)) {
       return res.status(403).json({ error: 'Acces refuse pour ce serveur' });
     }
+
+    if (!guildConfig) {
+      guildConfig = saveGuildConfig(guildId, effectiveConfig);
+      registerGuildCommands(guildId).catch(err => {
+        console.error(`[Bot] Erreur enregistrement commands pour ${guildId}:`, err);
+      });
+    }
+
     req.guildId = guildId;
     req.guild = guild;
     req.guildConfig = guildConfig;
