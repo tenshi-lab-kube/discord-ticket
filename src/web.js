@@ -65,7 +65,7 @@ function getPublicBaseUrl(req) {
 function getDiscordOAuthConfig(req) {
   const clientId = process.env.DISCORD_OAUTH_CLIENT_ID || process.env.CLIENT_ID;
   const clientSecret = process.env.DISCORD_OAUTH_CLIENT_SECRET;
-  const redirectUri = process.env.DISCORD_OAUTH_REDIRECT_URI || `${getPublicBaseUrl(req)}/auth/discord/callback`;
+  const redirectUri = process.env.DISCORD_OAUTH_REDIRECT_URI || `${getPublicBaseUrl(req)}/auth/callback`;
   return { clientId, clientSecret, redirectUri };
 }
 
@@ -106,7 +106,7 @@ app.get('/auth/discord', (req, res) => {
   res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
 });
 
-app.get('/auth/discord/callback', async (req, res) => {
+async function handleDiscordCallback(req, res) {
   const { code, state } = req.query;
   const { clientId, clientSecret, redirectUri } = getDiscordOAuthConfig(req);
   if (!code || !state || state !== req.session.oauthState) return res.status(400).send('Etat OAuth invalide');
@@ -144,7 +144,10 @@ app.get('/auth/discord/callback', async (req, res) => {
   } catch (err) {
     res.status(401).send(err.message);
   }
-});
+}
+
+app.get('/auth/callback', handleDiscordCallback);
+app.get('/auth/discord/callback', handleDiscordCallback);
 
 app.post('/auth/logout', (req, res) => {
   req.session.destroy(() => res.json({ success: true }));
