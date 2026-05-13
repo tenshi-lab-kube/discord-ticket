@@ -8,10 +8,7 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: discord-ticket
@@ -20,6 +17,8 @@ spec:
       labels:
         app.kubernetes.io/name: discord-ticket
     spec:
+      securityContext:
+        fsGroup: 1000
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -42,6 +41,7 @@ spec:
               if [ ! -s /runtime/config.json ]; then
                 cp /seed/config.json /runtime/config.json
               fi
+              chown -R 1000:1000 /runtime
           volumeMounts:
             - name: runtime
               mountPath: /runtime
