@@ -66,6 +66,8 @@ spec:
               value: /app/runtime/data/tickets.db
             - name: PUBLIC_URL
               value: https://tickets.tenshi-lab.fr
+            - name: DISCORD_OAUTH_REDIRECT_URI
+              value: https://tickets.tenshi-lab.fr/auth/callback
           envFrom:
             - secretRef:
                 name: discord-ticket-env
