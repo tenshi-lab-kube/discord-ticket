@@ -25,7 +25,7 @@ tickets.tenshi-lab.fr -> http://discord-ticket.discord-ticket.svc.cluster.local:
 Discord OAuth callback:
 
 ```text
-https://tickets.tenshi-lab.fr/auth/discord/callback
+https://tickets.tenshi-lab.fr/auth/callback
 ```
 
 The runtime `config.json` is multi-guild. Keep the new 16k-member guild with
