@@ -1,8 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, REST, Routes } = require('discord.js');
+const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { DEFAULT_GUILD_CONFIG, getGuildConfig, listConfiguredGuilds, saveGuildConfig } = require('../utils/config');
-const { getCommands } = require('../commands/index');
 const { buildPanelMessage } = require('../utils/panel');
 const db = require('../database');
 const { client } = require('../bot');
@@ -42,15 +41,6 @@ async function getAuthorizedGuilds(userId) {
     }
   }
   return result;
-}
-
-async function registerGuildCommands(guildId) {
-  const commands = getCommands();
-  const rest = new REST().setToken(process.env.BOT_TOKEN);
-  await rest.put(
-    Routes.applicationGuildCommands(process.env.CLIENT_ID, guildId),
-    { body: commands.map(command => command.data.toJSON()) },
-  );
 }
 
 async function pickTicketParent(guild, guildConfig, category) {
@@ -97,9 +87,6 @@ router.param('guildId', async (req, res, next, guildId) => {
 
     if (!guildConfig) {
       guildConfig = saveGuildConfig(guildId, effectiveConfig);
-      registerGuildCommands(guildId).catch(err => {
-        console.error(`[Bot] Erreur enregistrement commands pour ${guildId}:`, err);
-      });
     }
 
     req.guildId = guildId;
