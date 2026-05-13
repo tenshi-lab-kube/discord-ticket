@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { getConfig, getGuildConfig, listConfiguredGuilds, saveGuildConfig } = require('../utils/config');
+const { DEFAULT_GUILD_CONFIG, getGuildConfig, listConfiguredGuilds, saveGuildConfig } = require('../utils/config');
 const { buildPanelMessage } = require('../utils/panel');
 const db = require('../database');
 const { client } = require('../bot');
@@ -15,8 +15,15 @@ function isGuildAdmin(member, guildConfig) {
 
 async function getAuthorizedGuilds(userId) {
   const result = [];
-  for (const configured of listConfiguredGuilds()) {
-    const guild = client.guilds.cache.get(configured.guildId);
+  const configuredById = new Map(listConfiguredGuilds().map(configured => [configured.guildId, configured]));
+
+  for (const [, guild] of client.guilds.cache) {
+    const configured = configuredById.get(guild.id) ?? {
+      ...DEFAULT_GUILD_CONFIG,
+      guildId: guild.id,
+      name: guild.name,
+      enabled: false,
+    };
     if (!guild) continue;
     try {
       const member = await guild.members.fetch(userId);
