@@ -171,7 +171,32 @@ module.exports = {
   },
 
   getGuildStats(guildId) {
-    return db.prepare('SELECT * FROM guild_stats WHERE guild_id = ?').get(guildId);
+    const stored = db.prepare('SELECT * FROM guild_stats WHERE guild_id = ?').get(guildId);
+    const ticketHistory = db.prepare(`
+      SELECT COUNT(*) AS count, COALESCE(MAX(ticket_number), 0) AS max_number
+      FROM tickets
+      WHERE guild_id = ?
+    `).get(guildId);
+    const transcriptHistory = db.prepare(`
+      SELECT COALESCE(MAX(ticket_number), 0) AS max_number
+      FROM transcripts
+      WHERE guild_id = ?
+    `).get(guildId);
+
+    const totalCreated = Math.max(
+      stored?.total_created ?? 0,
+      ticketHistory?.count ?? 0,
+      ticketHistory?.max_number ?? 0,
+      transcriptHistory?.max_number ?? 0,
+    );
+
+    if (!stored) {
+      db.prepare('INSERT INTO guild_stats (guild_id, total_created) VALUES (?, ?)').run(guildId, totalCreated);
+    } else if (totalCreated > stored.total_created) {
+      db.prepare('UPDATE guild_stats SET total_created = ? WHERE guild_id = ?').run(totalCreated, guildId);
+    }
+
+    return { guild_id: guildId, total_created: totalCreated };
   },
 
   saveTranscript(data) {

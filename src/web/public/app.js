@@ -18,6 +18,7 @@ const api = async (method, path, body) => {
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
   return res.json();
 };
+window.dashboardApi = api;
 
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));

@@ -16,6 +16,9 @@
   };
 
   const apiRequest = async (method, path, body) => {
+    if (typeof api === 'function') return api(method, path, body);
+    if (typeof window.dashboardApi === 'function') return window.dashboardApi(method, path, body);
+
     const res = await fetch('/api' + path, {
       method,
       headers: body ? { 'Content-Type': 'application/json' } : {},

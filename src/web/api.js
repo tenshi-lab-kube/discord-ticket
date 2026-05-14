@@ -3,6 +3,7 @@ const router = express.Router();
 const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { DEFAULT_GUILD_CONFIG, getGuildConfig, listConfiguredGuilds, saveGuildConfig } = require('../utils/config');
 const { buildPanelMessage } = require('../utils/panel');
+const { normalizeEmbedMessage, getDefaultEmbedMessages, buildDiscordEmbedMessage } = require('../utils/embeds');
 const db = require('../database');
 const { client } = require('../bot');
 
@@ -61,6 +62,16 @@ async function pickTicketParent(guild, guildConfig, category) {
     name: `${prefix} ${candidates.size + 1}`,
     type: ChannelType.GuildCategory,
   });
+}
+
+function getEmbedMessages(guildConfig) {
+  return Array.isArray(guildConfig.embedMessages) ? guildConfig.embedMessages : getDefaultEmbedMessages();
+}
+
+function saveEmbedMessages(req, embedMessages) {
+  const saved = saveGuildConfig(req.guildId, { embedMessages });
+  req.guildConfig = saved;
+  return saved.embedMessages;
 }
 
 router.get('/guilds', async (req, res) => {
@@ -292,6 +303,70 @@ router.post('/:guildId/panel/deploy', async (req, res) => {
   const msg = await channel.send(buildPanelMessage(req.guildConfig));
   db.savePanel(req.guildId, channelId, msg.id);
   res.json({ success: true, messageId: msg.id });
+});
+
+router.get('/:guildId/embed-messages', (req, res) => {
+  const embedMessages = getEmbedMessages(req.guildConfig);
+  if (!Array.isArray(req.guildConfig.embedMessages)) {
+    saveEmbedMessages(req, embedMessages);
+  }
+  res.json(embedMessages);
+});
+
+router.post('/:guildId/embed-messages', (req, res) => {
+  try {
+    const embedMessages = [...getEmbedMessages(req.guildConfig)];
+    const embedMessage = normalizeEmbedMessage(req.body);
+    if (embedMessages.some(item => item.id === embedMessage.id)) {
+      return res.status(409).json({ error: 'ID embed deja utilise' });
+    }
+
+    embedMessages.push(embedMessage);
+    saveEmbedMessages(req, embedMessages);
+    res.json(embedMessage);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.put('/:guildId/embed-messages/:id', (req, res) => {
+  try {
+    const embedMessages = [...getEmbedMessages(req.guildConfig)];
+    const index = embedMessages.findIndex(item => item.id === req.params.id);
+    if (index === -1) return res.status(404).json({ error: 'Embed introuvable' });
+
+    const embedMessage = normalizeEmbedMessage({ ...embedMessages[index], ...req.body, id: req.params.id });
+    embedMessages[index] = embedMessage;
+    saveEmbedMessages(req, embedMessages);
+    res.json(embedMessage);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.delete('/:guildId/embed-messages/:id', (req, res) => {
+  saveEmbedMessages(req, getEmbedMessages(req.guildConfig).filter(item => item.id !== req.params.id));
+  res.json({ success: true });
+});
+
+router.post('/:guildId/embed-messages/:id/send', async (req, res) => {
+  const channelId = req.body?.channelId;
+  if (!channelId) return res.status(400).json({ error: 'Salon requis' });
+
+  const embedMessage = getEmbedMessages(req.guildConfig).find(item => item.id === req.params.id);
+  if (!embedMessage) return res.status(404).json({ error: 'Embed introuvable' });
+
+  const channel = req.guild.channels.cache.get(channelId);
+  if (!channel || channel.type !== ChannelType.GuildText) {
+    return res.status(404).json({ error: 'Salon texte introuvable' });
+  }
+
+  try {
+    const message = await channel.send(buildDiscordEmbedMessage(embedMessage));
+    res.json({ success: true, messageId: message.id });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 module.exports = router;
