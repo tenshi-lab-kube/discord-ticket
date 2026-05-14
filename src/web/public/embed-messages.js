@@ -53,7 +53,7 @@
     section.innerHTML = `
       <div class="page-header">
         <h2>Embeds</h2>
-        <button class="btn-primary" id="add-embed-btn">+ Ajouter</button>
+        <button type="button" class="btn-primary" id="add-embed-btn">+ Ajouter</button>
       </div>
       <div class="embed-workspace">
         <div class="card embed-list-card">
@@ -95,7 +95,7 @@
           <div id="custom-embed-preview" class="discord-embed-preview"></div>
           <hr>
           <h3>Envoyer</h3>
-          <div class="deploy-row"><select id="embed-send-channel-select"><option value="">Choisir un salon...</option></select><button id="send-embed-btn" class="btn-primary">Envoyer</button></div>
+          <div class="deploy-row"><select id="embed-send-channel-select"><option value="">Choisir un salon...</option></select><button type="button" id="send-embed-btn" class="btn-primary">Envoyer</button></div>
           <p id="embed-send-status" class="status-msg hidden"></p>
         </div>
       </div>`;
@@ -131,6 +131,10 @@
     fillForm(embedMessages.find(item => item.id === selectedId) || embedMessages[0] || emptyEmbed());
   }
 
+  function formControl(form, name) {
+    return form.elements.namedItem(name);
+  }
+
   function renderList() {
     const list = byId('embed-messages-list');
     if (!list) return;
@@ -154,10 +158,13 @@
     const form = byId('embed-message-form');
     if (!form) return;
     selectedId = data.id || null;
-    ['id','name','content','title','url','description','color','authorName','authorIcon','thumbnail','image','footer','footerIcon'].forEach(name => { form[name].value = data[name] || ''; });
-    form.color.value = data.color || '#5865F2';
-    form.colorPicker.value = data.color || '#5865F2';
-    form.timestamp.checked = Boolean(data.timestamp);
+    ['id','name','content','title','url','description','color','authorName','authorIcon','thumbnail','image','footer','footerIcon'].forEach(name => {
+      const control = formControl(form, name);
+      if (control) control.value = data[name] || '';
+    });
+    formControl(form, 'color').value = data.color || '#5865F2';
+    formControl(form, 'colorPicker').value = data.color || '#5865F2';
+    formControl(form, 'timestamp').checked = Boolean(data.timestamp);
     renderFields(data.fields || []);
     renderList();
     updatePreview();
@@ -175,20 +182,20 @@
   function readForm() {
     const form = byId('embed-message-form');
     return {
-      id: form.id.value,
-      name: form.name.value.trim(),
-      content: form.content.value,
-      title: form.title.value,
-      url: form.url.value,
-      description: form.description.value,
-      color: form.color.value || '#5865F2',
-      authorName: form.authorName.value,
-      authorIcon: form.authorIcon.value,
-      thumbnail: form.thumbnail.value,
-      image: form.image.value,
-      footer: form.footer.value,
-      footerIcon: form.footerIcon.value,
-      timestamp: form.timestamp.checked,
+      id: formControl(form, 'id').value,
+      name: formControl(form, 'name').value.trim(),
+      content: formControl(form, 'content').value,
+      title: formControl(form, 'title').value,
+      url: formControl(form, 'url').value,
+      description: formControl(form, 'description').value,
+      color: formControl(form, 'color').value || '#5865F2',
+      authorName: formControl(form, 'authorName').value,
+      authorIcon: formControl(form, 'authorIcon').value,
+      thumbnail: formControl(form, 'thumbnail').value,
+      image: formControl(form, 'image').value,
+      footer: formControl(form, 'footer').value,
+      footerIcon: formControl(form, 'footerIcon').value,
+      timestamp: formControl(form, 'timestamp').checked,
       fields: readFields(false),
     };
   }
@@ -224,7 +231,7 @@
   }
 
   async function sendEmbed() {
-    const id = byId('embed-message-form').id.value;
+    const id = formControl(byId('embed-message-form'), 'id').value;
     const channelId = byId('embed-send-channel-select').value;
     if (!id) return notify('Sauvegarde l embed avant de l envoyer', false);
     if (!channelId) return notify('Selectionne un salon', false);
@@ -243,6 +250,12 @@
   }
 
   function bindEvents() {
+    byId('embed-message-form')?.addEventListener('submit', async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      try { await saveEmbed(); } catch (error) { notify(error.message, false); }
+    });
+
     document.addEventListener('click', async event => {
       const nav = event.target.closest('[data-page="embeds"]');
       if (nav) {
@@ -266,7 +279,7 @@
         updatePreview();
       }
       if (event.target?.id === 'delete-embed-btn') {
-        const id = byId('embed-message-form').id.value;
+        const id = formControl(byId('embed-message-form'), 'id').value;
         if (!id) return notify('Aucun embed selectionne', false);
         if (!window.confirm('Supprimer cet embed ?')) return;
         await apiRequest('DELETE', `/embed-messages/${encodeURIComponent(id)}`);
@@ -287,6 +300,7 @@
     document.addEventListener('submit', async event => {
       if (event.target?.id !== 'embed-message-form') return;
       event.preventDefault();
+      event.stopPropagation();
       try { await saveEmbed(); } catch (error) { notify(error.message, false); }
     });
   }
