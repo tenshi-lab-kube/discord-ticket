@@ -1,5 +1,7 @@
 (() => {
   let customResponses = [];
+  let customResponseSettings = { allowed_channel_ids: [], allowed_category_ids: [] };
+  let guildChannels = [];
   let selectedResponseId = null;
 
   const byId = id => document.getElementById(id);
@@ -80,6 +82,22 @@
             </div>
           </form>
         </div>
+        <div class="card custom-responses-settings-card">
+          <h3>Restrictions</h3>
+          <form id="custom-response-settings-form">
+            <p class="custom-response-settings-help">Vide = le bot repond partout quand il est ping.</p>
+            <label>Salons autorises
+              <select name="allowed_channel_ids" multiple size="8"></select>
+            </label>
+            <label>Categories autorisees
+              <select name="allowed_category_ids" multiple size="8"></select>
+            </label>
+            <div class="modal-actions">
+              <button type="button" class="btn-secondary" id="clear-custom-response-settings-btn">Repondre partout</button>
+              <button type="submit" class="btn-primary">Sauvegarder</button>
+            </div>
+          </form>
+        </div>
       </div>`;
 
     const ticketsPage = byId('page-tickets');
@@ -92,15 +110,18 @@
     const style = document.createElement('style');
     style.id = 'custom-responses-styles';
     style.textContent = `
-      .custom-responses-workspace{display:grid;grid-template-columns:280px minmax(360px,1fr);gap:20px;align-items:start}
-      .custom-responses-list-card,.custom-responses-editor-card{min-width:0}
+      .custom-responses-workspace{display:grid;grid-template-columns:280px minmax(360px,1fr) 320px;gap:20px;align-items:start}
+      .custom-responses-list-card,.custom-responses-editor-card,.custom-responses-settings-card{min-width:0}
       .custom-responses-list{display:flex;flex-direction:column;gap:8px}
       .custom-response-item{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);cursor:pointer;padding:10px 12px;text-align:left}
       .custom-response-item:hover,.custom-response-item.active{border-color:var(--accent);background:var(--bg4)}
       .custom-response-item strong,.custom-response-item span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .custom-response-item span{color:var(--text-muted);font-size:12px;margin-top:4px}
+      .custom-response-settings-help{color:var(--text-muted);font-size:13px;margin:0 0 14px}
+      #custom-response-settings-form select{min-height:150px}
       #custom-response-form small{display:block;margin-top:6px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400}
-      @media(max-width:760px){.custom-responses-workspace{grid-template-columns:1fr}}
+      @media(max-width:1100px){.custom-responses-workspace{grid-template-columns:280px minmax(360px,1fr)}.custom-responses-settings-card{grid-column:1 / -1}}
+      @media(max-width:760px){.custom-responses-workspace{grid-template-columns:1fr}.custom-responses-settings-card{grid-column:auto}}
     `;
     document.head.appendChild(style);
   }
@@ -165,14 +186,64 @@
     `).join('');
   }
 
+  function selectedOptions(select) {
+    return Array.from(select?.selectedOptions || []).map(option => option.value).filter(Boolean);
+  }
+
+  function renderSettings() {
+    const form = byId('custom-response-settings-form');
+    if (!form) return;
+
+    const channelIds = new Set(customResponseSettings.allowed_channel_ids || []);
+    const categoryIds = new Set(customResponseSettings.allowed_category_ids || []);
+    const categoriesById = new Map(guildChannels.filter(channel => channel.type === 4).map(channel => [channel.id, channel.name]));
+    const textChannels = guildChannels
+      .filter(channel => channel.type === 0 || channel.type === 5)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    const categories = guildChannels
+      .filter(channel => channel.type === 4)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    form.allowed_channel_ids.innerHTML = textChannels.map(channel => {
+      const parent = channel.parentId && categoriesById.get(channel.parentId)
+        ? ` (${categoriesById.get(channel.parentId)})`
+        : '';
+      return `<option value="${escapeHtml(channel.id)}"${channelIds.has(channel.id) ? ' selected' : ''}># ${escapeHtml(channel.name)}${escapeHtml(parent)}</option>`;
+    }).join('');
+
+    form.allowed_category_ids.innerHTML = categories.map(category => (
+      `<option value="${escapeHtml(category.id)}"${categoryIds.has(category.id) ? ' selected' : ''}>${escapeHtml(category.name)}</option>`
+    )).join('');
+  }
+
+  async function loadSettings() {
+    const [channels, settings] = await Promise.all([
+      apiRequest('GET', '/guild/channels').catch(error => {
+        notify(error.message, false);
+        return [];
+      }),
+      apiRequest('GET', '/custom-responses/settings').catch(error => {
+        notify(error.message, false);
+        return { allowed_channel_ids: [], allowed_category_ids: [] };
+      }),
+    ]);
+    guildChannels = channels;
+    customResponseSettings = settings;
+    renderSettings();
+  }
+
   async function loadCustomResponses() {
     const guildId = currentGuildId();
     const form = byId('custom-response-form');
     if (form) form.guild_id.value = guildId;
-    customResponses = await apiRequest('GET', '/custom-responses').catch(error => {
-      notify(error.message, false);
-      return [];
-    });
+    const [responses] = await Promise.all([
+      apiRequest('GET', '/custom-responses').catch(error => {
+        notify(error.message, false);
+        return [];
+      }),
+      loadSettings(),
+    ]);
+    customResponses = responses;
     renderList();
     fillForm(customResponses.find(item => item.id === selectedResponseId) || emptyResponse());
   }
@@ -198,6 +269,29 @@
     selectedResponseId = null;
     notify('Reponse custom supprimee');
     await loadCustomResponses();
+  }
+
+  async function saveCustomResponseSettings() {
+    const form = byId('custom-response-settings-form');
+    if (!form) return;
+
+    customResponseSettings = await apiRequest('PUT', '/custom-responses/settings', {
+      guild_id: currentGuildId(),
+      allowed_channel_ids: selectedOptions(form.allowed_channel_ids),
+      allowed_category_ids: selectedOptions(form.allowed_category_ids),
+    });
+    renderSettings();
+    notify('Restrictions sauvegardees');
+  }
+
+  async function clearCustomResponseSettings() {
+    customResponseSettings = await apiRequest('PUT', '/custom-responses/settings', {
+      guild_id: currentGuildId(),
+      allowed_channel_ids: [],
+      allowed_category_ids: [],
+    });
+    renderSettings();
+    notify('Le bot repondra partout');
   }
 
   function bindEvents() {
@@ -230,9 +324,20 @@
       if (event.target?.id === 'delete-custom-response-btn') {
         try { await deleteCustomResponse(); } catch (error) { notify(error.message, false); }
       }
+
+      if (event.target?.id === 'clear-custom-response-settings-btn') {
+        try { await clearCustomResponseSettings(); } catch (error) { notify(error.message, false); }
+      }
     });
 
     document.addEventListener('submit', async event => {
+      if (event.target?.id === 'custom-response-settings-form') {
+        event.preventDefault();
+        event.stopPropagation();
+        try { await saveCustomResponseSettings(); } catch (error) { notify(error.message, false); }
+        return;
+      }
+
       if (event.target?.id !== 'custom-response-form') return;
       event.preventDefault();
       event.stopPropagation();

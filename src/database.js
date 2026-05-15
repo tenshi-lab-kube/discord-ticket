@@ -68,6 +68,13 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS custom_response_settings (
+    guild_id TEXT PRIMARY KEY,
+    allowed_channel_ids TEXT NOT NULL DEFAULT '[]',
+    allowed_category_ids TEXT NOT NULL DEFAULT '[]',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE INDEX IF NOT EXISTS idx_tickets_guild ON tickets(guild_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id, guild_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(channel_id);

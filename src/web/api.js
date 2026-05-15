@@ -129,6 +129,36 @@ router.get('/custom-responses', async (req, res) => {
   }
 });
 
+router.get('/custom-responses/settings', async (req, res) => {
+  const guildId = String(req.query.guild_id || '').trim();
+  if (!guildId) return res.status(400).json({ error: 'guild_id obligatoire' });
+  const context = await getAdminContext(req, res, guildId);
+  if (!context) return;
+
+  try {
+    res.json(customResponses.getCustomResponseSettings(guildId));
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
+});
+
+router.put('/custom-responses/settings', async (req, res) => {
+  const guildId = String(req.body?.guild_id || '').trim();
+  if (!guildId) return res.status(400).json({ error: 'guild_id obligatoire' });
+  const context = await getAdminContext(req, res, guildId);
+  if (!context) return;
+
+  try {
+    res.json(customResponses.updateCustomResponseSettings({
+      guild_id: guildId,
+      allowed_channel_ids: req.body.allowed_channel_ids,
+      allowed_category_ids: req.body.allowed_category_ids,
+    }));
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
+});
+
 router.post('/custom-responses', async (req, res) => {
   const guildId = String(req.body?.guild_id || '').trim();
   if (!guildId) return res.status(400).json({ error: 'guild_id obligatoire' });
@@ -274,6 +304,26 @@ router.get('/:guildId/tickets', (req, res) => {
 router.get('/:guildId/custom-responses', (req, res) => {
   try {
     res.json(customResponses.listCustomResponses(req.guildId));
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
+});
+
+router.get('/:guildId/custom-responses/settings', (req, res) => {
+  try {
+    res.json(customResponses.getCustomResponseSettings(req.guildId));
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
+});
+
+router.put('/:guildId/custom-responses/settings', (req, res) => {
+  try {
+    res.json(customResponses.updateCustomResponseSettings({
+      guild_id: req.guildId,
+      allowed_channel_ids: req.body.allowed_channel_ids,
+      allowed_category_ids: req.body.allowed_category_ids,
+    }));
   } catch (error) {
     sendCustomResponseError(res, error);
   }

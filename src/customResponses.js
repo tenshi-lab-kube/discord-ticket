@@ -12,6 +12,22 @@ function normalizeContent(content) {
   return String(content || '').trim().toLowerCase();
 }
 
+function normalizeIdList(value) {
+  const source = Array.isArray(value) ? value : [];
+  return [...new Set(source
+    .map(item => String(item || '').trim())
+    .filter(Boolean))];
+}
+
+function parseIdList(value) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return normalizeIdList(parsed);
+  } catch {
+    return [];
+  }
+}
+
 function normalizeInput(input = {}) {
   const guildId = String(input.guild_id || input.guildId || '').trim();
   const keyword = normalizeKeyword(input.keyword);
@@ -26,6 +42,17 @@ function normalizeInput(input = {}) {
   }
 
   return { guildId, keyword, response, createdBy };
+}
+
+function normalizeSettings(input = {}) {
+  const guildId = String(input.guild_id || input.guildId || '').trim();
+  if (!guildId) throw new Error('guild_id obligatoire');
+
+  return {
+    guildId,
+    allowedChannelIds: normalizeIdList(input.allowed_channel_ids || input.allowedChannelIds),
+    allowedCategoryIds: normalizeIdList(input.allowed_category_ids || input.allowedCategoryIds),
+  };
 }
 
 function mapSqlError(error) {
@@ -138,15 +165,69 @@ function findMatchingResponse(guildId, content) {
   return rows.find(row => normalizedContent.includes(row.keyword)) || null;
 }
 
+function getCustomResponseSettings(guildId) {
+  const normalizedGuildId = String(guildId || '').trim();
+  if (!normalizedGuildId) throw new Error('guild_id obligatoire');
+
+  return withSqlErrors(() => {
+    const row = db.prepare(`
+      SELECT guild_id, allowed_channel_ids, allowed_category_ids
+      FROM custom_response_settings
+      WHERE guild_id = ?
+    `).get(normalizedGuildId);
+
+    return {
+      guild_id: normalizedGuildId,
+      allowed_channel_ids: parseIdList(row?.allowed_channel_ids),
+      allowed_category_ids: parseIdList(row?.allowed_category_ids),
+    };
+  });
+}
+
+function updateCustomResponseSettings(input) {
+  const data = normalizeSettings(input);
+
+  return withSqlErrors(() => {
+    db.prepare(`
+      INSERT INTO custom_response_settings (guild_id, allowed_channel_ids, allowed_category_ids, updated_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(guild_id) DO UPDATE SET
+        allowed_channel_ids = excluded.allowed_channel_ids,
+        allowed_category_ids = excluded.allowed_category_ids,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(
+      data.guildId,
+      JSON.stringify(data.allowedChannelIds),
+      JSON.stringify(data.allowedCategoryIds),
+    );
+
+    return getCustomResponseSettings(data.guildId);
+  });
+}
+
+function isCustomResponseLocationAllowed(guildId, channelId, categoryId = null) {
+  const settings = getCustomResponseSettings(guildId);
+  const allowedChannels = settings.allowed_channel_ids;
+  const allowedCategories = settings.allowed_category_ids;
+
+  if (!allowedChannels.length && !allowedCategories.length) return true;
+  if (allowedChannels.includes(String(channelId || ''))) return true;
+  if (categoryId && allowedCategories.includes(String(categoryId))) return true;
+  return false;
+}
+
 module.exports = {
   MAX_RESPONSE_LENGTH,
   addCustomResponse,
   findMatchingResponse,
+  getCustomResponseSettings,
   getCustomResponseById,
+  isCustomResponseLocationAllowed,
   listCustomResponses,
   normalizeContent,
   normalizeKeyword,
   removeCustomResponseById,
   removeCustomResponseByKeyword,
+  updateCustomResponseSettings,
   updateCustomResponse,
 };

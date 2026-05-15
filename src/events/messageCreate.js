@@ -1,4 +1,4 @@
-const { findMatchingResponse } = require('../customResponses');
+const { findMatchingResponse, isCustomResponseLocationAllowed } = require('../customResponses');
 
 const CUSTOM_RESPONSE_COOLDOWN_MS = 10000;
 const customResponseCooldowns = new Map();
@@ -19,6 +19,13 @@ module.exports = {
 
       const content = stripBotMention(message.content, client.user.id);
       if (!content) return;
+
+      const isAllowedLocation = isCustomResponseLocationAllowed(
+        message.guildId,
+        message.channelId,
+        message.channel?.parentId,
+      );
+      if (!isAllowedLocation) return;
 
       const cooldownKey = `${message.guildId}:${message.author.id}`;
       const now = Date.now();
