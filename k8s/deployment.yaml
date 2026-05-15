@@ -17,7 +17,7 @@ spec:
       labels:
         app.kubernetes.io/name: discord-ticket
       annotations:
-        app.kubernetes.io/restarted-at: "2026-05-14T13:23:18Z"
+        app.kubernetes.io/restarted-at: "2026-05-15T00:00:00Z"
     spec:
       securityContext:
         fsGroup: 1000

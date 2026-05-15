@@ -6,6 +6,7 @@ const { buildPanelMessage } = require('../utils/panel');
 const { normalizeEmbedMessage, getDefaultEmbedMessages, buildDiscordEmbedMessage } = require('../utils/embeds');
 const db = require('../database');
 const { client } = require('../bot');
+const customResponses = require('../customResponses');
 
 function isGuildAdmin(member, guildConfig) {
   if (member.id === member.guild.ownerId) return true;
@@ -44,6 +45,39 @@ async function getAuthorizedGuilds(userId) {
   return result;
 }
 
+async function getAdminContext(req, res, guildId) {
+  let guildConfig = getGuildConfig(guildId, { requireEnabled: false });
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) {
+    res.status(404).json({ error: 'Serveur introuvable' });
+    return null;
+  }
+
+  try {
+    const member = await guild.members.fetch(req.session.user.id);
+    const effectiveConfig = guildConfig ?? {
+      ...DEFAULT_GUILD_CONFIG,
+      guildId,
+      name: guild.name,
+      enabled: true,
+    };
+
+    if (!isGuildAdmin(member, effectiveConfig)) {
+      res.status(403).json({ error: 'Acces refuse pour ce serveur' });
+      return null;
+    }
+
+    if (!guildConfig) {
+      guildConfig = saveGuildConfig(guildId, effectiveConfig);
+    }
+
+    return { guild, guildConfig, guildId, member };
+  } catch {
+    res.status(403).json({ error: 'Tu ne fais pas partie de ce serveur' });
+    return null;
+  }
+}
+
 async function pickTicketParent(guild, guildConfig, category) {
   if (category.categoryId) {
     const configured = guild.channels.cache.get(category.categoryId);
@@ -78,36 +112,80 @@ router.get('/guilds', async (req, res) => {
   res.json(await getAuthorizedGuilds(req.session.user.id));
 });
 
-router.param('guildId', async (req, res, next, guildId) => {
-  let guildConfig = getGuildConfig(guildId, { requireEnabled: false });
-  const guild = client.guilds.cache.get(guildId);
-  if (!guild) return res.status(404).json({ error: 'Serveur introuvable' });
+function sendCustomResponseError(res, error) {
+  res.status(error.status || 400).json({ error: error.message || 'Erreur custom responses' });
+}
+
+router.get('/custom-responses', async (req, res) => {
+  const guildId = String(req.query.guild_id || '').trim();
+  if (!guildId) return res.status(400).json({ error: 'guild_id obligatoire' });
+  const context = await getAdminContext(req, res, guildId);
+  if (!context) return;
 
   try {
-    const member = await guild.members.fetch(req.session.user.id);
-    const effectiveConfig = guildConfig ?? {
-      ...DEFAULT_GUILD_CONFIG,
-      guildId,
-      name: guild.name,
-      enabled: true,
-    };
-
-    if (!isGuildAdmin(member, effectiveConfig)) {
-      return res.status(403).json({ error: 'Acces refuse pour ce serveur' });
-    }
-
-    if (!guildConfig) {
-      guildConfig = saveGuildConfig(guildId, effectiveConfig);
-    }
-
-    req.guildId = guildId;
-    req.guild = guild;
-    req.guildConfig = guildConfig;
-    req.member = member;
-    next();
-  } catch {
-    res.status(403).json({ error: 'Tu ne fais pas partie de ce serveur' });
+    res.json(customResponses.listCustomResponses(guildId));
+  } catch (error) {
+    sendCustomResponseError(res, error);
   }
+});
+
+router.post('/custom-responses', async (req, res) => {
+  const guildId = String(req.body?.guild_id || '').trim();
+  if (!guildId) return res.status(400).json({ error: 'guild_id obligatoire' });
+  const context = await getAdminContext(req, res, guildId);
+  if (!context) return;
+
+  try {
+    res.json(customResponses.addCustomResponse({
+      guild_id: guildId,
+      keyword: req.body.keyword,
+      response: req.body.response,
+      created_by: req.session.user.id,
+    }));
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
+});
+
+router.put('/custom-responses/:id', async (req, res) => {
+  const existing = customResponses.getCustomResponseById(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Reponse custom introuvable' });
+  const context = await getAdminContext(req, res, existing.guild_id);
+  if (!context) return;
+
+  try {
+    res.json(customResponses.updateCustomResponse(req.params.id, {
+      guild_id: existing.guild_id,
+      keyword: req.body.keyword,
+      response: req.body.response,
+    }));
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
+});
+
+router.delete('/custom-responses/:id', async (req, res) => {
+  const existing = customResponses.getCustomResponseById(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Reponse custom introuvable' });
+  const context = await getAdminContext(req, res, existing.guild_id);
+  if (!context) return;
+
+  try {
+    const removed = customResponses.removeCustomResponseById(req.params.id, existing.guild_id);
+    res.json({ success: removed });
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
+});
+
+router.param('guildId', async (req, res, next, guildId) => {
+  const context = await getAdminContext(req, res, guildId);
+  if (!context) return;
+  req.guildId = context.guildId;
+  req.guild = context.guild;
+  req.guildConfig = context.guildConfig;
+  req.member = context.member;
+  next();
 });
 
 router.get('/:guildId/config', (req, res) => {
@@ -191,6 +269,49 @@ router.get('/:guildId/stats', (req, res) => {
 
 router.get('/:guildId/tickets', (req, res) => {
   res.json(db.getAllTickets(req.guildId));
+});
+
+router.get('/:guildId/custom-responses', (req, res) => {
+  try {
+    res.json(customResponses.listCustomResponses(req.guildId));
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
+});
+
+router.post('/:guildId/custom-responses', (req, res) => {
+  try {
+    res.json(customResponses.addCustomResponse({
+      guild_id: req.guildId,
+      keyword: req.body.keyword,
+      response: req.body.response,
+      created_by: req.session.user.id,
+    }));
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
+});
+
+router.put('/:guildId/custom-responses/:id', (req, res) => {
+  try {
+    res.json(customResponses.updateCustomResponse(req.params.id, {
+      guild_id: req.guildId,
+      keyword: req.body.keyword,
+      response: req.body.response,
+    }));
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
+});
+
+router.delete('/:guildId/custom-responses/:id', (req, res) => {
+  try {
+    const removed = customResponses.removeCustomResponseById(req.params.id, req.guildId);
+    if (!removed) return res.status(404).json({ error: 'Reponse custom introuvable' });
+    res.json({ success: true });
+  } catch (error) {
+    sendCustomResponseError(res, error);
+  }
 });
 
 router.get('/:guildId/transcripts', (req, res) => {

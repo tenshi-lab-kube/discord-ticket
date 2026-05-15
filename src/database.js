@@ -59,11 +59,24 @@ db.exec(`
     data TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS custom_responses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    keyword TEXT NOT NULL,
+    response TEXT NOT NULL,
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE INDEX IF NOT EXISTS idx_tickets_guild ON tickets(guild_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id, guild_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(channel_id);
   CREATE INDEX IF NOT EXISTS idx_transcripts_guild ON transcripts(guild_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_responses_guild_keyword ON custom_responses(guild_id, keyword);
+  CREATE INDEX IF NOT EXISTS idx_custom_responses_guild ON custom_responses(guild_id);
 `);
+
+console.log(`[db] SQLite ready at ${DB_PATH}`);
 
 try {
   db.exec(`
