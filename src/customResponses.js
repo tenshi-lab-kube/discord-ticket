@@ -52,6 +52,7 @@ function normalizeSettings(input = {}) {
     guildId,
     allowedChannelIds: normalizeIdList(input.allowed_channel_ids || input.allowedChannelIds),
     allowedCategoryIds: normalizeIdList(input.allowed_category_ids || input.allowedCategoryIds),
+    deniedChannelIds: normalizeIdList(input.denied_channel_ids || input.deniedChannelIds),
   };
 }
 
@@ -171,7 +172,7 @@ function getCustomResponseSettings(guildId) {
 
   return withSqlErrors(() => {
     const row = db.prepare(`
-      SELECT guild_id, allowed_channel_ids, allowed_category_ids
+      SELECT guild_id, allowed_channel_ids, allowed_category_ids, denied_channel_ids
       FROM custom_response_settings
       WHERE guild_id = ?
     `).get(normalizedGuildId);
@@ -180,6 +181,7 @@ function getCustomResponseSettings(guildId) {
       guild_id: normalizedGuildId,
       allowed_channel_ids: parseIdList(row?.allowed_channel_ids),
       allowed_category_ids: parseIdList(row?.allowed_category_ids),
+      denied_channel_ids: parseIdList(row?.denied_channel_ids),
     };
   });
 }
@@ -189,16 +191,24 @@ function updateCustomResponseSettings(input) {
 
   return withSqlErrors(() => {
     db.prepare(`
-      INSERT INTO custom_response_settings (guild_id, allowed_channel_ids, allowed_category_ids, updated_at)
-      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+      INSERT INTO custom_response_settings (
+        guild_id,
+        allowed_channel_ids,
+        allowed_category_ids,
+        denied_channel_ids,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(guild_id) DO UPDATE SET
         allowed_channel_ids = excluded.allowed_channel_ids,
         allowed_category_ids = excluded.allowed_category_ids,
+        denied_channel_ids = excluded.denied_channel_ids,
         updated_at = CURRENT_TIMESTAMP
     `).run(
       data.guildId,
       JSON.stringify(data.allowedChannelIds),
       JSON.stringify(data.allowedCategoryIds),
+      JSON.stringify(data.deniedChannelIds),
     );
 
     return getCustomResponseSettings(data.guildId);
@@ -209,9 +219,12 @@ function isCustomResponseLocationAllowed(guildId, channelId, categoryId = null) 
   const settings = getCustomResponseSettings(guildId);
   const allowedChannels = settings.allowed_channel_ids;
   const allowedCategories = settings.allowed_category_ids;
+  const deniedChannels = settings.denied_channel_ids;
+  const normalizedChannelId = String(channelId || '');
 
+  if (deniedChannels.includes(normalizedChannelId)) return false;
   if (!allowedChannels.length && !allowedCategories.length) return true;
-  if (allowedChannels.includes(String(channelId || ''))) return true;
+  if (allowedChannels.includes(normalizedChannelId)) return true;
   if (categoryId && allowedCategories.includes(String(categoryId))) return true;
   return false;
 }

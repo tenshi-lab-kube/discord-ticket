@@ -72,6 +72,7 @@ db.exec(`
     guild_id TEXT PRIMARY KEY,
     allowed_channel_ids TEXT NOT NULL DEFAULT '[]',
     allowed_category_ids TEXT NOT NULL DEFAULT '[]',
+    denied_channel_ids TEXT NOT NULL DEFAULT '[]',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -104,6 +105,9 @@ if (!columnExists('transcripts', 'partial')) {
 }
 if (!columnExists('transcripts', 'error')) {
   db.exec('ALTER TABLE transcripts ADD COLUMN error TEXT');
+}
+if (!columnExists('custom_response_settings', 'denied_channel_ids')) {
+  db.exec("ALTER TABLE custom_response_settings ADD COLUMN denied_channel_ids TEXT NOT NULL DEFAULT '[]'");
 }
 
 const createTicketTx = db.transaction((data) => {

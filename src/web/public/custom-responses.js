@@ -1,6 +1,6 @@
 (() => {
   let customResponses = [];
-  let customResponseSettings = { allowed_channel_ids: [], allowed_category_ids: [] };
+  let customResponseSettings = { allowed_channel_ids: [], allowed_category_ids: [], denied_channel_ids: [] };
   let guildChannels = [];
   let selectedResponseId = null;
 
@@ -92,6 +92,9 @@
             <label>Categories autorisees
               <select name="allowed_category_ids" multiple size="8"></select>
             </label>
+            <label>Salons exclus
+              <select name="denied_channel_ids" multiple size="8"></select>
+            </label>
             <div class="modal-actions">
               <button type="button" class="btn-secondary" id="clear-custom-response-settings-btn">Repondre partout</button>
               <button type="submit" class="btn-primary">Sauvegarder</button>
@@ -118,7 +121,7 @@
       .custom-response-item strong,.custom-response-item span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .custom-response-item span{color:var(--text-muted);font-size:12px;margin-top:4px}
       .custom-response-settings-help{color:var(--text-muted);font-size:13px;margin:0 0 14px}
-      #custom-response-settings-form select{min-height:150px}
+      #custom-response-settings-form select{min-height:120px}
       #custom-response-form small{display:block;margin-top:6px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400}
       @media(max-width:1100px){.custom-responses-workspace{grid-template-columns:280px minmax(360px,1fr)}.custom-responses-settings-card{grid-column:1 / -1}}
       @media(max-width:760px){.custom-responses-workspace{grid-template-columns:1fr}.custom-responses-settings-card{grid-column:auto}}
@@ -196,6 +199,7 @@
 
     const channelIds = new Set(customResponseSettings.allowed_channel_ids || []);
     const categoryIds = new Set(customResponseSettings.allowed_category_ids || []);
+    const deniedChannelIds = new Set(customResponseSettings.denied_channel_ids || []);
     const categoriesById = new Map(guildChannels.filter(channel => channel.type === 4).map(channel => [channel.id, channel.name]));
     const textChannels = guildChannels
       .filter(channel => channel.type === 0 || channel.type === 5)
@@ -211,6 +215,13 @@
       return `<option value="${escapeHtml(channel.id)}"${channelIds.has(channel.id) ? ' selected' : ''}># ${escapeHtml(channel.name)}${escapeHtml(parent)}</option>`;
     }).join('');
 
+    form.denied_channel_ids.innerHTML = textChannels.map(channel => {
+      const parent = channel.parentId && categoriesById.get(channel.parentId)
+        ? ` (${categoriesById.get(channel.parentId)})`
+        : '';
+      return `<option value="${escapeHtml(channel.id)}"${deniedChannelIds.has(channel.id) ? ' selected' : ''}># ${escapeHtml(channel.name)}${escapeHtml(parent)}</option>`;
+    }).join('');
+
     form.allowed_category_ids.innerHTML = categories.map(category => (
       `<option value="${escapeHtml(category.id)}"${categoryIds.has(category.id) ? ' selected' : ''}>${escapeHtml(category.name)}</option>`
     )).join('');
@@ -224,7 +235,7 @@
       }),
       apiRequest('GET', '/custom-responses/settings').catch(error => {
         notify(error.message, false);
-        return { allowed_channel_ids: [], allowed_category_ids: [] };
+        return { allowed_channel_ids: [], allowed_category_ids: [], denied_channel_ids: [] };
       }),
     ]);
     guildChannels = channels;
@@ -279,6 +290,7 @@
       guild_id: currentGuildId(),
       allowed_channel_ids: selectedOptions(form.allowed_channel_ids),
       allowed_category_ids: selectedOptions(form.allowed_category_ids),
+      denied_channel_ids: selectedOptions(form.denied_channel_ids),
     });
     renderSettings();
     notify('Restrictions sauvegardees');
@@ -289,6 +301,7 @@
       guild_id: currentGuildId(),
       allowed_channel_ids: [],
       allowed_category_ids: [],
+      denied_channel_ids: [],
     });
     renderSettings();
     notify('Le bot repondra partout');
