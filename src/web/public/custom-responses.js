@@ -201,6 +201,12 @@
   }
 
   function bindEvents() {
+    byId('custom-response-form')?.addEventListener('submit', async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      try { await saveCustomResponse(); } catch (error) { notify(error.message, false); }
+    });
+
     document.addEventListener('click', async event => {
       const nav = event.target.closest('[data-page="custom-responses"]');
       if (nav) {
@@ -229,6 +235,7 @@
     document.addEventListener('submit', async event => {
       if (event.target?.id !== 'custom-response-form') return;
       event.preventDefault();
+      event.stopPropagation();
       try { await saveCustomResponse(); } catch (error) { notify(error.message, false); }
     });
 

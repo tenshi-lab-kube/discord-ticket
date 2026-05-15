@@ -20,10 +20,18 @@ const api = async (method, path, body) => {
 };
 window.dashboardApi = api;
 
+document.addEventListener('submit', event => {
+  if (event.target?.closest?.('#dashboard')) {
+    event.preventDefault();
+  }
+}, true);
+
 function showPage(name) {
+  const page = $(`page-${name}`);
+  if (!page) return;
   document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  $(`page-${name}`).classList.remove('hidden');
+  page.classList.remove('hidden');
   document.querySelector(`[data-page="${name}"]`)?.classList.add('active');
 }
 
