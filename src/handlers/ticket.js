@@ -12,6 +12,8 @@ const db = require('../database');
 const { getGuildConfig } = require('../utils/config');
 const { enqueue } = require('../utils/queue');
 
+const TICKET_CATEGORY_PAGE_SIZE = 25;
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function buildTicketButtons(status = 'open') {
@@ -51,6 +53,53 @@ function buildConfirmRow(action, originalMessageId) {
 function isStaff(member, config) {
   if (!config.staffRoles?.length) return member.permissions.has(PermissionFlagsBits.ManageChannels);
   return config.staffRoles.some(roleId => member.roles.cache.has(roleId));
+}
+
+function getAccessibleTicketCategories(config, member) {
+  return (config.ticketCategories ?? []).filter(cat => {
+    if (!cat.requiredRole) return true;
+    return member.roles.cache.has(cat.requiredRole);
+  });
+}
+
+function buildCategorySelectResponse(config, accessible, page = 0) {
+  const pageCount = Math.max(1, Math.ceil(accessible.length / TICKET_CATEGORY_PAGE_SIZE));
+  const currentPage = Math.min(Math.max(Number(page) || 0, 0), pageCount - 1);
+  const offset = currentPage * TICKET_CATEGORY_PAGE_SIZE;
+  const pageItems = accessible.slice(offset, offset + TICKET_CATEGORY_PAGE_SIZE);
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('ticket_category_select')
+    .setPlaceholder(config.panel?.placeholder ?? 'Comment pouvons-nous t\'aider ?')
+    .addOptions(pageItems.map(cat => ({
+      label: String(cat.name || cat.id).slice(0, 100),
+      description: cat.description ? String(cat.description).slice(0, 100) : undefined,
+      value: String(cat.id).slice(0, 100),
+      emoji: cat.emoji || undefined,
+    })));
+
+  const components = [new ActionRowBuilder().addComponents(select)];
+  if (pageCount > 1) {
+    components.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`ticket_category_page:${currentPage - 1}`)
+        .setLabel('Precedent')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(currentPage <= 0),
+      new ButtonBuilder()
+        .setCustomId(`ticket_category_page:${currentPage + 1}`)
+        .setLabel('Suivant')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(currentPage >= pageCount - 1),
+    ));
+  }
+
+  return {
+    content: pageCount > 1
+      ? `Choisis une categorie de ticket. Page ${currentPage + 1}/${pageCount}.`
+      : 'Choisis une categorie de ticket.',
+    components,
+  };
 }
 
 async function sendLog(guild, config, embed) {
@@ -500,8 +549,42 @@ async function executeDelete(interaction, originalMessageId) {
   setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
 }
 
+async function handleCategoryPage(interaction, page) {
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.update({ content: 'Serveur non configure.', components: [] });
+
+  const accessible = getAccessibleTicketCategories(config, interaction.member);
+  if (!accessible.length) {
+    return interaction.update({
+      content: 'âŒ Tu n\'as accÃ¨s Ã  aucune catÃ©gorie de ticket.',
+      components: [],
+    });
+  }
+
+  return interaction.update(buildCategorySelectResponse(config, accessible, page));
+}
+
+async function handleOpenTicketPanel(interaction) {
+  const config = getGuildConfig(interaction.guildId);
+  if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
+
+  const accessible = getAccessibleTicketCategories(config, interaction.member);
+  if (!accessible.length) {
+    return interaction.reply({
+      content: 'âŒ Tu n\'as accÃ¨s Ã  aucune catÃ©gorie de ticket.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  return interaction.reply({
+    ...buildCategorySelectResponse(config, accessible, 0),
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
 module.exports = {
   handleOpenTicketPanel,
+  handleCategoryPage,
   handleCategorySelect,
   handleClaim, handleClose, handleReopen, handleDelete,
   executeClaim, executeClose, executeReopen, executeDelete,

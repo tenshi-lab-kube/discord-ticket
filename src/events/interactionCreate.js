@@ -69,6 +69,7 @@ module.exports = {
       // Boutons principaux du ticket → affichent la confirmation
       switch (parts[0]) {
         case 'open_ticket_panel': await ticketHandler.handleOpenTicketPanel(interaction).catch(console.error); break;
+        case 'ticket_category_page': await ticketHandler.handleCategoryPage(interaction, Number(parts[1]) || 0).catch(console.error); break;
         case 'ticket_claim':  await ticketHandler.handleClaim(interaction).catch(console.error);  break;
         case 'ticket_close':  await ticketHandler.handleClose(interaction).catch(console.error);  break;
         case 'ticket_reopen': await ticketHandler.handleReopen(interaction).catch(console.error); break;
