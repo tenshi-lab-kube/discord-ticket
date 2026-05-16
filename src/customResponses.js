@@ -53,6 +53,7 @@ function normalizeSettings(input = {}) {
     allowedChannelIds: normalizeIdList(input.allowed_channel_ids || input.allowedChannelIds),
     allowedCategoryIds: normalizeIdList(input.allowed_category_ids || input.allowedCategoryIds),
     deniedChannelIds: normalizeIdList(input.denied_channel_ids || input.deniedChannelIds),
+    deniedCategoryIds: normalizeIdList(input.denied_category_ids || input.deniedCategoryIds),
   };
 }
 
@@ -172,7 +173,7 @@ function getCustomResponseSettings(guildId) {
 
   return withSqlErrors(() => {
     const row = db.prepare(`
-      SELECT guild_id, allowed_channel_ids, allowed_category_ids, denied_channel_ids
+      SELECT guild_id, allowed_channel_ids, allowed_category_ids, denied_channel_ids, denied_category_ids
       FROM custom_response_settings
       WHERE guild_id = ?
     `).get(normalizedGuildId);
@@ -182,6 +183,7 @@ function getCustomResponseSettings(guildId) {
       allowed_channel_ids: parseIdList(row?.allowed_channel_ids),
       allowed_category_ids: parseIdList(row?.allowed_category_ids),
       denied_channel_ids: parseIdList(row?.denied_channel_ids),
+      denied_category_ids: parseIdList(row?.denied_category_ids),
     };
   });
 }
@@ -196,19 +198,22 @@ function updateCustomResponseSettings(input) {
         allowed_channel_ids,
         allowed_category_ids,
         denied_channel_ids,
+        denied_category_ids,
         updated_at
       )
-      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(guild_id) DO UPDATE SET
         allowed_channel_ids = excluded.allowed_channel_ids,
         allowed_category_ids = excluded.allowed_category_ids,
         denied_channel_ids = excluded.denied_channel_ids,
+        denied_category_ids = excluded.denied_category_ids,
         updated_at = CURRENT_TIMESTAMP
     `).run(
       data.guildId,
       JSON.stringify(data.allowedChannelIds),
       JSON.stringify(data.allowedCategoryIds),
       JSON.stringify(data.deniedChannelIds),
+      JSON.stringify(data.deniedCategoryIds),
     );
 
     return getCustomResponseSettings(data.guildId);
@@ -220,12 +225,15 @@ function isCustomResponseLocationAllowed(guildId, channelId, categoryId = null) 
   const allowedChannels = settings.allowed_channel_ids;
   const allowedCategories = settings.allowed_category_ids;
   const deniedChannels = settings.denied_channel_ids;
+  const deniedCategories = settings.denied_category_ids;
   const normalizedChannelId = String(channelId || '');
+  const normalizedCategoryId = String(categoryId || '');
 
   if (deniedChannels.includes(normalizedChannelId)) return false;
-  if (!allowedChannels.length && !allowedCategories.length) return true;
   if (allowedChannels.includes(normalizedChannelId)) return true;
-  if (categoryId && allowedCategories.includes(String(categoryId))) return true;
+  if (normalizedCategoryId && deniedCategories.includes(normalizedCategoryId)) return false;
+  if (!allowedChannels.length && !allowedCategories.length && !deniedCategories.length) return true;
+  if (normalizedCategoryId && allowedCategories.includes(normalizedCategoryId)) return true;
   return false;
 }
 

@@ -73,6 +73,7 @@ db.exec(`
     allowed_channel_ids TEXT NOT NULL DEFAULT '[]',
     allowed_category_ids TEXT NOT NULL DEFAULT '[]',
     denied_channel_ids TEXT NOT NULL DEFAULT '[]',
+    denied_category_ids TEXT NOT NULL DEFAULT '[]',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -108,6 +109,9 @@ if (!columnExists('transcripts', 'error')) {
 }
 if (!columnExists('custom_response_settings', 'denied_channel_ids')) {
   db.exec("ALTER TABLE custom_response_settings ADD COLUMN denied_channel_ids TEXT NOT NULL DEFAULT '[]'");
+}
+if (!columnExists('custom_response_settings', 'denied_category_ids')) {
+  db.exec("ALTER TABLE custom_response_settings ADD COLUMN denied_category_ids TEXT NOT NULL DEFAULT '[]'");
 }
 
 const createTicketTx = db.transaction((data) => {

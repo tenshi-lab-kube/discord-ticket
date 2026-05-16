@@ -1,6 +1,11 @@
 (() => {
   let customResponses = [];
-  let customResponseSettings = { allowed_channel_ids: [], allowed_category_ids: [], denied_channel_ids: [] };
+  let customResponseSettings = {
+    allowed_channel_ids: [],
+    allowed_category_ids: [],
+    denied_channel_ids: [],
+    denied_category_ids: [],
+  };
   let guildChannels = [];
   let selectedResponseId = null;
 
@@ -86,15 +91,42 @@
           <h3>Restrictions</h3>
           <form id="custom-response-settings-form">
             <p class="custom-response-settings-help">Vide = le bot repond partout quand il est ping.</p>
-            <label>Salons autorises
-              <select name="allowed_channel_ids" multiple size="8"></select>
-            </label>
-            <label>Categories autorisees
-              <select name="allowed_category_ids" multiple size="8"></select>
-            </label>
-            <label>Salons exclus
-              <select name="denied_channel_ids" multiple size="8"></select>
-            </label>
+            <div class="custom-response-rule" data-rule="allowed_channel_ids">
+              <label>Salons acceptes
+                <div class="custom-response-rule-picker">
+                  <select data-rule-select="allowed_channel_ids"></select>
+                  <button type="button" class="btn-secondary" data-rule-add="allowed_channel_ids">Ajouter</button>
+                </div>
+              </label>
+              <div class="custom-response-rule-list" data-rule-list="allowed_channel_ids"></div>
+            </div>
+            <div class="custom-response-rule" data-rule="allowed_category_ids">
+              <label>Categories acceptees
+                <div class="custom-response-rule-picker">
+                  <select data-rule-select="allowed_category_ids"></select>
+                  <button type="button" class="btn-secondary" data-rule-add="allowed_category_ids">Ajouter</button>
+                </div>
+              </label>
+              <div class="custom-response-rule-list" data-rule-list="allowed_category_ids"></div>
+            </div>
+            <div class="custom-response-rule" data-rule="denied_channel_ids">
+              <label>Salons refuses
+                <div class="custom-response-rule-picker">
+                  <select data-rule-select="denied_channel_ids"></select>
+                  <button type="button" class="btn-secondary" data-rule-add="denied_channel_ids">Ajouter</button>
+                </div>
+              </label>
+              <div class="custom-response-rule-list" data-rule-list="denied_channel_ids"></div>
+            </div>
+            <div class="custom-response-rule" data-rule="denied_category_ids">
+              <label>Categories refusees
+                <div class="custom-response-rule-picker">
+                  <select data-rule-select="denied_category_ids"></select>
+                  <button type="button" class="btn-secondary" data-rule-add="denied_category_ids">Ajouter</button>
+                </div>
+              </label>
+              <div class="custom-response-rule-list" data-rule-list="denied_category_ids"></div>
+            </div>
             <div class="modal-actions">
               <button type="button" class="btn-secondary" id="clear-custom-response-settings-btn">Repondre partout</button>
               <button type="submit" class="btn-primary">Sauvegarder</button>
@@ -121,7 +153,15 @@
       .custom-response-item strong,.custom-response-item span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .custom-response-item span{color:var(--text-muted);font-size:12px;margin-top:4px}
       .custom-response-settings-help{color:var(--text-muted);font-size:13px;margin:0 0 14px}
-      #custom-response-settings-form select{min-height:120px}
+      .custom-response-rule{border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:10px;background:var(--bg2)}
+      .custom-response-rule-picker{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:6px}
+      .custom-response-rule-picker select{min-width:0}
+      .custom-response-rule-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;min-height:28px}
+      .custom-response-rule-list .empty{color:var(--text-muted);font-size:12px;line-height:28px}
+      .custom-response-rule-chip{align-items:center;background:var(--bg4);border:1px solid var(--border);border-radius:999px;color:var(--text);display:inline-flex;font-size:12px;gap:6px;max-width:100%;padding:5px 8px}
+      .custom-response-rule-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .custom-response-rule-chip button{background:transparent;border:0;color:var(--text-muted);cursor:pointer;font-size:14px;line-height:1;padding:0}
+      .custom-response-rule-chip button:hover{color:var(--danger)}
       #custom-response-form small{display:block;margin-top:6px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400}
       @media(max-width:1100px){.custom-responses-workspace{grid-template-columns:280px minmax(360px,1fr)}.custom-responses-settings-card{grid-column:1 / -1}}
       @media(max-width:760px){.custom-responses-workspace{grid-template-columns:1fr}.custom-responses-settings-card{grid-column:auto}}
@@ -189,42 +229,81 @@
     `).join('');
   }
 
-  function selectedOptions(select) {
-    return Array.from(select?.selectedOptions || []).map(option => option.value).filter(Boolean);
+  const settingsRules = {
+    allowed_channel_ids: { type: 'channel', empty: 'Aucun salon accepte' },
+    allowed_category_ids: { type: 'category', empty: 'Aucune categorie acceptee' },
+    denied_channel_ids: { type: 'channel', empty: 'Aucun salon refuse' },
+    denied_category_ids: { type: 'category', empty: 'Aucune categorie refusee' },
+  };
+
+  function getTextChannels() {
+    return guildChannels
+      .filter(channel => channel.type === 0 || channel.type === 5)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+
+  function getCategories() {
+    return guildChannels
+      .filter(channel => channel.type === 4)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+
+  function getChannelLabel(channelId) {
+    const channel = guildChannels.find(item => item.id === channelId);
+    if (!channel) return channelId;
+    const parent = channel.parentId
+      ? guildChannels.find(item => item.id === channel.parentId && item.type === 4)?.name
+      : '';
+    return `# ${channel.name}${parent ? ` (${parent})` : ''}`;
+  }
+
+  function getCategoryLabel(categoryId) {
+    return guildChannels.find(item => item.id === categoryId && item.type === 4)?.name || categoryId;
+  }
+
+  function normalizeSettingsState(settings = customResponseSettings) {
+    customResponseSettings = {
+      allowed_channel_ids: Array.isArray(settings.allowed_channel_ids) ? settings.allowed_channel_ids : [],
+      allowed_category_ids: Array.isArray(settings.allowed_category_ids) ? settings.allowed_category_ids : [],
+      denied_channel_ids: Array.isArray(settings.denied_channel_ids) ? settings.denied_channel_ids : [],
+      denied_category_ids: Array.isArray(settings.denied_category_ids) ? settings.denied_category_ids : [],
+      guild_id: settings.guild_id || currentGuildId(),
+    };
+  }
+
+  function renderRule(ruleName) {
+    const rule = settingsRules[ruleName];
+    const select = document.querySelector(`[data-rule-select="${ruleName}"]`);
+    const list = document.querySelector(`[data-rule-list="${ruleName}"]`);
+    if (!rule || !select || !list) return;
+
+    const selectedIds = new Set(customResponseSettings[ruleName] || []);
+    const items = rule.type === 'category' ? getCategories() : getTextChannels();
+    select.innerHTML = `<option value="">Choisir...</option>` + items.map(item => {
+      const label = rule.type === 'category' ? getCategoryLabel(item.id) : getChannelLabel(item.id);
+      return `<option value="${escapeHtml(item.id)}"${selectedIds.has(item.id) ? ' disabled' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+
+    const selected = customResponseSettings[ruleName] || [];
+    if (!selected.length) {
+      list.innerHTML = `<span class="empty">${escapeHtml(rule.empty)}</span>`;
+      return;
+    }
+
+    list.innerHTML = selected.map(id => {
+      const label = rule.type === 'category' ? getCategoryLabel(id) : getChannelLabel(id);
+      return `
+        <span class="custom-response-rule-chip">
+          <span>${escapeHtml(label)}</span>
+          <button type="button" title="Retirer" data-rule-remove="${escapeHtml(ruleName)}" data-rule-id="${escapeHtml(id)}">x</button>
+        </span>
+      `;
+    }).join('');
   }
 
   function renderSettings() {
-    const form = byId('custom-response-settings-form');
-    if (!form) return;
-
-    const channelIds = new Set(customResponseSettings.allowed_channel_ids || []);
-    const categoryIds = new Set(customResponseSettings.allowed_category_ids || []);
-    const deniedChannelIds = new Set(customResponseSettings.denied_channel_ids || []);
-    const categoriesById = new Map(guildChannels.filter(channel => channel.type === 4).map(channel => [channel.id, channel.name]));
-    const textChannels = guildChannels
-      .filter(channel => channel.type === 0 || channel.type === 5)
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    const categories = guildChannels
-      .filter(channel => channel.type === 4)
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-
-    form.allowed_channel_ids.innerHTML = textChannels.map(channel => {
-      const parent = channel.parentId && categoriesById.get(channel.parentId)
-        ? ` (${categoriesById.get(channel.parentId)})`
-        : '';
-      return `<option value="${escapeHtml(channel.id)}"${channelIds.has(channel.id) ? ' selected' : ''}># ${escapeHtml(channel.name)}${escapeHtml(parent)}</option>`;
-    }).join('');
-
-    form.denied_channel_ids.innerHTML = textChannels.map(channel => {
-      const parent = channel.parentId && categoriesById.get(channel.parentId)
-        ? ` (${categoriesById.get(channel.parentId)})`
-        : '';
-      return `<option value="${escapeHtml(channel.id)}"${deniedChannelIds.has(channel.id) ? ' selected' : ''}># ${escapeHtml(channel.name)}${escapeHtml(parent)}</option>`;
-    }).join('');
-
-    form.allowed_category_ids.innerHTML = categories.map(category => (
-      `<option value="${escapeHtml(category.id)}"${categoryIds.has(category.id) ? ' selected' : ''}>${escapeHtml(category.name)}</option>`
-    )).join('');
+    normalizeSettingsState();
+    Object.keys(settingsRules).forEach(renderRule);
   }
 
   async function loadSettings() {
@@ -235,11 +314,11 @@
       }),
       apiRequest('GET', '/custom-responses/settings').catch(error => {
         notify(error.message, false);
-        return { allowed_channel_ids: [], allowed_category_ids: [], denied_channel_ids: [] };
+        return { allowed_channel_ids: [], allowed_category_ids: [], denied_channel_ids: [], denied_category_ids: [] };
       }),
     ]);
     guildChannels = channels;
-    customResponseSettings = settings;
+    normalizeSettingsState(settings);
     renderSettings();
   }
 
@@ -283,15 +362,14 @@
   }
 
   async function saveCustomResponseSettings() {
-    const form = byId('custom-response-settings-form');
-    if (!form) return;
-
     customResponseSettings = await apiRequest('PUT', '/custom-responses/settings', {
       guild_id: currentGuildId(),
-      allowed_channel_ids: selectedOptions(form.allowed_channel_ids),
-      allowed_category_ids: selectedOptions(form.allowed_category_ids),
-      denied_channel_ids: selectedOptions(form.denied_channel_ids),
+      allowed_channel_ids: customResponseSettings.allowed_channel_ids,
+      allowed_category_ids: customResponseSettings.allowed_category_ids,
+      denied_channel_ids: customResponseSettings.denied_channel_ids,
+      denied_category_ids: customResponseSettings.denied_category_ids,
     });
+    normalizeSettingsState(customResponseSettings);
     renderSettings();
     notify('Restrictions sauvegardees');
   }
@@ -302,9 +380,27 @@
       allowed_channel_ids: [],
       allowed_category_ids: [],
       denied_channel_ids: [],
+      denied_category_ids: [],
     });
+    normalizeSettingsState(customResponseSettings);
     renderSettings();
     notify('Le bot repondra partout');
+  }
+
+  function addRuleItem(ruleName) {
+    const select = document.querySelector(`[data-rule-select="${ruleName}"]`);
+    const value = select?.value || '';
+    if (!settingsRules[ruleName] || !value) return;
+    const current = new Set(customResponseSettings[ruleName] || []);
+    current.add(value);
+    customResponseSettings[ruleName] = [...current];
+    renderSettings();
+  }
+
+  function removeRuleItem(ruleName, value) {
+    if (!settingsRules[ruleName]) return;
+    customResponseSettings[ruleName] = (customResponseSettings[ruleName] || []).filter(item => item !== value);
+    renderSettings();
   }
 
   function bindEvents() {
@@ -340,6 +436,17 @@
 
       if (event.target?.id === 'clear-custom-response-settings-btn') {
         try { await clearCustomResponseSettings(); } catch (error) { notify(error.message, false); }
+      }
+
+      const addButton = event.target.closest('[data-rule-add]');
+      if (addButton) {
+        addRuleItem(addButton.dataset.ruleAdd);
+        return;
+      }
+
+      const removeButton = event.target.closest('[data-rule-remove]');
+      if (removeButton) {
+        removeRuleItem(removeButton.dataset.ruleRemove, removeButton.dataset.ruleId);
       }
     });
 

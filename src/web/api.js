@@ -154,6 +154,7 @@ router.put('/custom-responses/settings', async (req, res) => {
       allowed_channel_ids: req.body.allowed_channel_ids,
       allowed_category_ids: req.body.allowed_category_ids,
       denied_channel_ids: req.body.denied_channel_ids,
+      denied_category_ids: req.body.denied_category_ids,
     }));
   } catch (error) {
     sendCustomResponseError(res, error);
@@ -325,6 +326,7 @@ router.put('/:guildId/custom-responses/settings', (req, res) => {
       allowed_channel_ids: req.body.allowed_channel_ids,
       allowed_category_ids: req.body.allowed_category_ids,
       denied_channel_ids: req.body.denied_channel_ids,
+      denied_category_ids: req.body.denied_category_ids,
     }));
   } catch (error) {
     sendCustomResponseError(res, error);
