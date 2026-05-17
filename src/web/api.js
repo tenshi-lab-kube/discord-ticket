@@ -108,6 +108,91 @@ function saveEmbedMessages(req, embedMessages) {
   return saved.embedMessages;
 }
 
+function parseTranscriptMessages(transcript) {
+  try {
+    const parsed = Array.isArray(transcript.messages)
+      ? transcript.messages
+      : JSON.parse(transcript.messages || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function formatTranscriptMessage(message) {
+  const author = message.author || message.authorId || 'Utilisateur';
+  const botTag = message.bot ? ' [BOT]' : '';
+  const time = message.timestamp
+    ? new Date(message.timestamp).toLocaleString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    : '';
+
+  const parts = [];
+  if (message.content) parts.push(String(message.content));
+
+  for (const embed of message.embeds || []) {
+    if (embed.title) parts.push(`> ${embed.title}`);
+    if (embed.description) parts.push(`> ${String(embed.description).replace(/\n/g, '\n> ')}`);
+    for (const field of embed.fields || []) {
+      parts.push(`> ${field.name}: ${field.value}`);
+    }
+    if (embed.footer) parts.push(`> ${embed.footer}`);
+  }
+
+  for (const attachment of message.attachments || []) {
+    const name = attachment.name || 'piece jointe';
+    if (attachment.url) parts.push(`${name}: ${attachment.url}`);
+    else parts.push(name);
+  }
+
+  if (!parts.length) return '';
+  return `**${author}${botTag}**${time ? ` - ${time}` : ''}\n${parts.join('\n')}`;
+}
+
+async function sendChunked(channel, text) {
+  const maxLength = 1900;
+  let remaining = String(text || '');
+  while (remaining.length > maxLength) {
+    const splitAt = remaining.lastIndexOf('\n', maxLength);
+    const index = splitAt > 200 ? splitAt : maxLength;
+    await channel.send(remaining.slice(0, index));
+    remaining = remaining.slice(index).trimStart();
+  }
+  if (remaining.trim()) await channel.send(remaining);
+}
+
+async function replayTranscript(channel, transcript) {
+  const messages = parseTranscriptMessages(transcript)
+    .map(formatTranscriptMessage)
+    .filter(Boolean);
+
+  const header = new EmbedBuilder()
+    .setColor('#FEE75C')
+    .setTitle('Historique du ticket précédent')
+    .setDescription(`Transcript #${transcript.id} - ${messages.length} message(s) archive(s)`)
+    .setTimestamp();
+
+  await channel.send({ embeds: [header] });
+  if (!messages.length) return;
+
+  let buffer = '';
+  for (const message of messages) {
+    const next = `${message}\n\n`;
+    if ((buffer + next).length > 1900) {
+      await sendChunked(channel, buffer);
+      buffer = '';
+    }
+    if (next.length > 1900) await sendChunked(channel, next);
+    else buffer += next;
+  }
+  await sendChunked(channel, buffer);
+}
+
 router.get('/guilds', async (req, res) => {
   res.json(await getAuthorizedGuilds(req.session.user.id));
 });
@@ -444,6 +529,9 @@ router.post('/:guildId/transcripts/:id/reopen', async (req, res) => {
   });
 
   res.json({ success: true, channelId: channel.id, channelName });
+  replayTranscript(channel, transcript).catch(error => {
+    console.error('[transcripts] Replay failed:', error);
+  });
 });
 
 router.get('/:guildId/guild/channels', async (req, res) => {
