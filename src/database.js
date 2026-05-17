@@ -89,13 +89,9 @@ db.exec(`
 console.log(`[db] SQLite ready at ${DB_PATH}`);
 
 try {
-  db.exec(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_open_user_category
-      ON tickets(guild_id, user_id, category_id)
-      WHERE status = 'open'
-  `);
+  db.exec('DROP INDEX IF EXISTS idx_tickets_open_user_category');
 } catch (error) {
-  console.warn('[db] Anti-double-ticket index skipped. Clean duplicate open tickets before enabling it.', error.message);
+  console.warn('[db] Could not drop legacy open ticket limit index.', error.message);
 }
 
 function columnExists(table, column) {

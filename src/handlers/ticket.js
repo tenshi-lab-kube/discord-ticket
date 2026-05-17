@@ -71,6 +71,17 @@ function getAccessibleTicketCategories(config, member) {
   });
 }
 
+function getTicketLimit(value, fallback = 1) {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  return fallback;
+}
+
+function isEnabled(value) {
+  if (typeof value === 'string') return value.toLowerCase() === 'true';
+  return Boolean(value);
+}
+
 function buildCategorySelectResponse(config, accessible, page = 0) {
   const pageCount = Math.max(1, Math.ceil(accessible.length / TICKET_CATEGORY_PAGE_SIZE));
   const currentPage = Math.min(Math.max(Number(page) || 0, 0), pageCount - 1);
@@ -235,8 +246,8 @@ async function handleCategorySelect(interaction) {
   }
 
   // Vérification du nombre max de tickets (global ou par catégorie)
-  const globalMax = config.tickets?.globalMax ?? false;
-  const globalLimit = config.tickets?.maxPerUser ?? 1;
+  const globalMax = isEnabled(config.tickets?.globalMax);
+  const globalLimit = getTicketLimit(config.tickets?.maxPerUser, 1);
 
   if (globalMax) {
     const allOpen = db.getOpenTicketsByUserGlobal(interaction.user.id, interaction.guildId);
@@ -248,7 +259,7 @@ async function handleCategorySelect(interaction) {
     }
   } else {
     const existing = db.getOpenTicketsByUser(interaction.user.id, interaction.guildId, categoryId);
-    const catLimit = category.maxTickets ?? globalLimit;
+    const catLimit = getTicketLimit(category.maxTickets, globalLimit);
     if (existing.length >= catLimit) {
       return interaction.reply({
         content: `❌ Tu as déjà un ticket ouvert dans cette catégorie : <#${existing[0].channel_id}>`,
@@ -277,7 +288,7 @@ async function handleCategorySelect(interaction) {
     }
   } else {
     const existing = db.getOpenTicketsByUser(interaction.user.id, interaction.guildId, categoryId);
-    const catLimit = category.maxTickets ?? globalLimit;
+    const catLimit = getTicketLimit(category.maxTickets, globalLimit);
     if (existing.length >= catLimit) {
       return interaction.editReply({
         content: `❌ Tu as déjà un ticket ouvert dans cette catégorie : <#${existing[0].channel_id}>`,
@@ -327,12 +338,21 @@ async function handleCategorySelect(interaction) {
     topic: `Ticket de ${interaction.user.tag} | Catégorie: ${category.name}`,
   });
 
-  const storedTicketNumber = db.createTicket({
-    channelId: channel.id,
-    guildId: guild.id,
-    userId: interaction.user.id,
-    categoryId,
-  });
+  let storedTicketNumber;
+  try {
+    storedTicketNumber = db.createTicket({
+      channelId: channel.id,
+      guildId: guild.id,
+      userId: interaction.user.id,
+      categoryId,
+    });
+  } catch (error) {
+    await channel.delete().catch(() => {});
+    console.error('[tickets] Failed to create ticket record:', error);
+    return interaction.editReply({
+      content: '❌ Le salon a ete cree, mais le ticket n a pas pu etre enregistre. Le salon temporaire a ete supprime.',
+    });
+  }
 
   const openEmbed = new EmbedBuilder()
     .setColor(config.panel?.color ?? '#5865F2')
