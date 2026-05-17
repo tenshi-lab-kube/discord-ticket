@@ -34,6 +34,15 @@ function buildTicketButtons(status = 'open') {
   return row;
 }
 
+function buildDeleteTicketButton() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('ticket_delete')
+      .setLabel('Supprimer')
+      .setStyle(ButtonStyle.Danger),
+  );
+}
+
 // customId format: tc:{action}:{originalMessageId}
 function buildConfirmRow(action, originalMessageId) {
   return new ActionRowBuilder().addComponents(
@@ -549,6 +558,36 @@ async function executeDelete(interaction, originalMessageId) {
   setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
 }
 
+async function notifyTicketOwnerLeft(member) {
+  const config = getGuildConfig(member.guild.id);
+  if (!config) return;
+
+  const tickets = db.getOpenTicketsByUserGlobal(member.id, member.guild.id);
+  if (!tickets.length) return;
+
+  for (const ticket of tickets) {
+    const channel = member.guild.channels.cache.get(ticket.channel_id)
+      ?? await member.guild.channels.fetch(ticket.channel_id).catch(() => null);
+
+    if (!channel?.isTextBased?.()) continue;
+
+    const embed = new EmbedBuilder()
+      .setColor('#ED4245')
+      .setTitle('Utilisateur parti du serveur')
+      .setDescription(`<@${member.id}> a quitte le Discord alors que ce ticket est encore ouvert.`)
+      .addFields(
+        { name: 'Utilisateur', value: `${member.user.tag} (${member.id})`, inline: false },
+        { name: 'Action', value: 'Vous pouvez supprimer le ticket avec le bouton ci-dessous si besoin.', inline: false },
+      )
+      .setTimestamp();
+
+    await channel.send({
+      embeds: [embed],
+      components: [buildDeleteTicketButton()],
+    }).catch(() => {});
+  }
+}
+
 async function handleCategoryPage(interaction, page) {
   const config = getGuildConfig(interaction.guildId);
   if (!config) return interaction.update({ content: 'Serveur non configure.', components: [] });
@@ -588,4 +627,5 @@ module.exports = {
   handleCategorySelect,
   handleClaim, handleClose, handleReopen, handleDelete,
   executeClaim, executeClose, executeReopen, executeDelete,
+  notifyTicketOwnerLeft,
 };
