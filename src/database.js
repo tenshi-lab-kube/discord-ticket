@@ -22,7 +22,8 @@ db.exec(`
     claimed_by TEXT,
     created_at INTEGER NOT NULL,
     closed_at INTEGER,
-    panel_message_id TEXT
+    panel_message_id TEXT,
+    owner_left_message_id TEXT
   );
 
   CREATE TABLE IF NOT EXISTS panels (
@@ -113,6 +114,9 @@ if (!columnExists('custom_response_settings', 'denied_channel_ids')) {
 if (!columnExists('custom_response_settings', 'denied_category_ids')) {
   db.exec("ALTER TABLE custom_response_settings ADD COLUMN denied_category_ids TEXT NOT NULL DEFAULT '[]'");
 }
+if (!columnExists('tickets', 'owner_left_message_id')) {
+  db.exec('ALTER TABLE tickets ADD COLUMN owner_left_message_id TEXT');
+}
 
 const createTicketTx = db.transaction((data) => {
   const ticketNumber = db
@@ -174,6 +178,14 @@ module.exports = {
 
   updateTicketCategory(channelId, categoryId) {
     return db.prepare('UPDATE tickets SET category_id = ? WHERE channel_id = ?').run(categoryId, channelId);
+  },
+
+  setTicketOwnerLeftMessage(channelId, messageId) {
+    return db.prepare('UPDATE tickets SET owner_left_message_id = ? WHERE channel_id = ?').run(messageId, channelId);
+  },
+
+  clearTicketOwnerLeftMessage(channelId) {
+    return db.prepare('UPDATE tickets SET owner_left_message_id = NULL WHERE channel_id = ?').run(channelId);
   },
 
   softDeleteTicket(channelId) {

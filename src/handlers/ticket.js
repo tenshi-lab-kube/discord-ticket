@@ -581,9 +581,47 @@ async function notifyTicketOwnerLeft(member) {
       )
       .setTimestamp();
 
-    await channel.send({
+    const message = await channel.send({
       embeds: [embed],
       components: [buildDeleteTicketButton()],
+    }).catch(() => {});
+
+    if (message) db.setTicketOwnerLeftMessage(ticket.channel_id, message.id);
+  }
+}
+
+async function notifyTicketOwnerReturned(member) {
+  const config = getGuildConfig(member.guild.id);
+  if (!config) return;
+
+  const tickets = db.getOpenTicketsByUserGlobal(member.id, member.guild.id);
+  if (!tickets.length) return;
+
+  for (const ticket of tickets) {
+    const channel = member.guild.channels.cache.get(ticket.channel_id)
+      ?? await member.guild.channels.fetch(ticket.channel_id).catch(() => null);
+
+    if (!channel?.isTextBased?.()) continue;
+
+    if (ticket.owner_left_message_id) {
+      const leftMessage = await channel.messages.fetch(ticket.owner_left_message_id).catch(() => null);
+      if (leftMessage) await leftMessage.delete().catch(() => {});
+      db.clearTicketOwnerLeftMessage(ticket.channel_id);
+    }
+
+    await channel.permissionOverwrites.edit(member.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+    }).catch(() => {});
+
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor('#57F287')
+          .setDescription(`<@${member.id}> est de nouveau present sur le Discord.`)
+          .setTimestamp(),
+      ],
     }).catch(() => {});
   }
 }
@@ -628,4 +666,5 @@ module.exports = {
   handleClaim, handleClose, handleReopen, handleDelete,
   executeClaim, executeClose, executeReopen, executeDelete,
   notifyTicketOwnerLeft,
+  notifyTicketOwnerReturned,
 };
