@@ -18,6 +18,30 @@ function canManageGuild(member) {
     || member?.permissions?.has(PermissionFlagsBits.ManageGuild);
 }
 
+function parseDuration(value) {
+  if (!value) return null;
+  const match = String(value).trim().toLowerCase().match(/^(\d+)\s*(m|h|d|w)$/);
+  if (!match) throw new Error('Duree invalide. Exemples: 30m, 2h, 7d, 1w.');
+
+  const amount = Number(match[1]);
+  const unitMs = {
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+    w: 7 * 24 * 60 * 60 * 1000,
+  }[match[2]];
+
+  return Date.now() + amount * unitMs;
+}
+
+function formatBanStatus(ban) {
+  if (!ban) return 'Aucun ban ticket trouve.';
+  if (ban.revoked_at) return `Ban revoque <t:${Math.floor(ban.revoked_at / 1000)}:R> par <@${ban.revoked_by}>.`;
+  if (ban.expires_at && ban.expires_at <= Date.now()) return `Ban expire <t:${Math.floor(ban.expires_at / 1000)}:R>.`;
+  const expires = ban.expires_at ? `<t:${Math.floor(ban.expires_at / 1000)}:R>` : 'jamais';
+  return `Ban actif. Expiration: ${expires}. Raison: ${ban.reason || 'Aucune raison'}`;
+}
+
 const setupCommand = {
   data: new SlashCommandBuilder()
     .setName('setup')
@@ -124,6 +148,81 @@ const customResponseCommand = {
   },
 };
 
+const ticketBanCommand = {
+  data: new SlashCommandBuilder()
+    .setName('ticketban')
+    .setDescription('Gestion des bans de tickets')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand(sub =>
+      sub.setName('ban')
+        .setDescription('Interdit a un utilisateur d ouvrir des tickets')
+        .addUserOption(opt => opt.setName('utilisateur').setDescription('Utilisateur a bannir des tickets').setRequired(true))
+        .addStringOption(opt => opt.setName('raison').setDescription('Raison du ban ticket').setMaxLength(500))
+        .addStringOption(opt => opt.setName('duree').setDescription('Duree optionnelle: 30m, 2h, 7d, 1w'))
+    )
+    .addSubcommand(sub =>
+      sub.setName('unban')
+        .setDescription('Retire le ban ticket actif d un utilisateur')
+        .addUserOption(opt => opt.setName('utilisateur').setDescription('Utilisateur a debannir').setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub.setName('info')
+        .setDescription('Verifie le statut ticketban d un utilisateur')
+        .addUserOption(opt => opt.setName('utilisateur').setDescription('Utilisateur a verifier').setRequired(true))
+    ),
+
+  async execute(interaction) {
+    const config = getGuildConfig(interaction.guildId);
+    if (!config) return interaction.reply({ content: 'Serveur non configure.', ephemeral: true });
+    if (!canManageGuild(interaction.member) && !isStaff(interaction.member, config)) {
+      return interaction.reply({ content: 'Permission requise: staff ou Manage Server.', ephemeral: true });
+    }
+
+    const sub = interaction.options.getSubcommand();
+    const user = interaction.options.getUser('utilisateur', true);
+
+    try {
+      if (sub === 'ban') {
+        const reason = interaction.options.getString('raison') || 'Aucune raison';
+        const expiresAt = parseDuration(interaction.options.getString('duree'));
+        db.addTicketBan({
+          guildId: interaction.guildId,
+          userId: user.id,
+          bannedBy: interaction.user.id,
+          reason,
+          expiresAt,
+        });
+
+        const expires = expiresAt ? `<t:${Math.floor(expiresAt / 1000)}:R>` : 'jamais';
+        return interaction.reply({
+          content: `✅ <@${user.id}> est maintenant banni de l'ouverture de tickets. Expiration: ${expires}.`,
+          ephemeral: true,
+        });
+      }
+
+      if (sub === 'unban') {
+        const result = db.revokeTicketBan(interaction.guildId, user.id, interaction.user.id);
+        return interaction.reply({
+          content: result.changes
+            ? `✅ <@${user.id}> peut a nouveau ouvrir des tickets.`
+            : `ℹ️ Aucun ban ticket actif pour <@${user.id}>.`,
+          ephemeral: true,
+        });
+      }
+
+      if (sub === 'info') {
+        const ban = db.getTicketBanInfo(interaction.guildId, user.id);
+        return interaction.reply({
+          content: `Statut ticketban de <@${user.id}>: ${formatBanStatus(ban)}`,
+          ephemeral: true,
+        });
+      }
+    } catch (error) {
+      return interaction.reply({ content: `❌ ${error.message}`, ephemeral: true });
+    }
+  },
+};
+
 const ticketCommand = {
   data: new SlashCommandBuilder()
     .setName('ticket')
@@ -219,7 +318,7 @@ const ticketCommand = {
   }
 };
 
-const commands = [setupCommand, ticketCommand, customResponseCommand];
+const commands = [setupCommand, ticketCommand, ticketBanCommand, customResponseCommand];
 
 function getCommands() {
   return commands;

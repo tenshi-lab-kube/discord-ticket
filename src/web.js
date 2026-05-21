@@ -169,7 +169,10 @@ app.get('*', (req, res) => {
 });
 
 function startWeb() {
-  const port = process.env.WEB_PORT || 3000;
+  const configuredPort = process.env.WEB_PORT && !process.env.WEB_PORT.includes('{{')
+    ? process.env.WEB_PORT
+    : process.env.SERVER_PORT;
+  const port = configuredPort || 3000;
   app.listen(port, () => {
     console.log(`[Web] Dashboard disponible sur http://localhost:${port}`);
   });

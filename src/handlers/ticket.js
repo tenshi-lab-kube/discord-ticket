@@ -233,6 +233,18 @@ async function handleOpenTicketPanel(interaction) {
 async function handleCategorySelect(interaction) {
   const config = getGuildConfig(interaction.guildId);
   if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
+
+  const activeBan = db.getActiveTicketBan(interaction.guildId, interaction.user.id);
+  if (activeBan) {
+    const expires = activeBan.expires_at
+      ? `<t:${Math.floor(activeBan.expires_at / 1000)}:R>`
+      : 'jamais';
+    return interaction.reply({
+      content: `❌ Tu es banni de l'ouverture de tickets. Expiration: ${expires}.\nRaison: ${activeBan.reason || 'Aucune raison'}`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
   const categoryId = interaction.values[0];
   const category = config.ticketCategories.find(c => c.id === categoryId);
   if (!category) return interaction.reply({ content: '❌ Catégorie introuvable.', flags: MessageFlags.Ephemeral });

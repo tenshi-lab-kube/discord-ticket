@@ -388,6 +388,15 @@ router.get('/:guildId/tickets', (req, res) => {
   res.json(db.getAllTickets(req.guildId));
 });
 
+router.get('/:guildId/ticket-bans', (req, res) => {
+  res.json(db.listTicketBans(req.guildId));
+});
+
+router.delete('/:guildId/ticket-bans/:userId', (req, res) => {
+  const result = db.revokeTicketBan(req.guildId, req.params.userId, req.session.user.id);
+  res.json({ success: result.changes > 0 });
+});
+
 router.get('/:guildId/custom-responses', (req, res) => {
   try {
     res.json(customResponses.listCustomResponses(req.guildId));

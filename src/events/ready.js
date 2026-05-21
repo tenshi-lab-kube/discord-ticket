@@ -2,8 +2,12 @@ const { REST, Routes } = require('discord.js');
 const { getCommands } = require('../commands/index');
 const { listConfiguredGuilds } = require('../utils/config');
 
+function isSnowflake(value) {
+  return /^\d{17,20}$/.test(String(value || ''));
+}
+
 module.exports = {
-  name: 'ready',
+  name: 'clientReady',
   once: true,
   async execute(client) {
     console.log(`[Bot] Connecte en tant que ${client.user.tag}`);
@@ -18,6 +22,11 @@ module.exports = {
     }
 
     for (const guild of guilds) {
+      if (!isSnowflake(guild.guildId)) {
+        console.warn(`[Bot] Serveur ignore: guildId invalide (${guild.guildId}). Verifie runtime/config.json.`);
+        continue;
+      }
+
       try {
         await rest.put(
           Routes.applicationGuildCommands(process.env.CLIENT_ID, guild.guildId),

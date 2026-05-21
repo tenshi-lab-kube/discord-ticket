@@ -9,7 +9,10 @@
     .replace(/"/g, '&quot;');
 
   const apiRequest = async (method, path) => {
-    const res = await fetch('/api' + path, { method });
+    if (typeof window.dashboardApi === 'function') return window.dashboardApi(method, path);
+
+    const guildId = byId('guild-select')?.value || '';
+    const res = await fetch(`/api/${guildId}${path}`, { method });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
     return res.json();
   };
@@ -32,6 +35,66 @@
     expired: 'Expire',
     revoked: 'Revoque',
   }[status] || '-');
+
+  const installUi = () => {
+    if (byId('page-ticket-bans')) return;
+
+    const ticketsButton = document.querySelector('[data-page="tickets"]');
+    if (ticketsButton) {
+      const button = document.createElement('button');
+      button.className = 'nav-btn';
+      button.dataset.page = 'ticket-bans';
+      button.textContent = 'Bans tickets';
+      ticketsButton.insertAdjacentElement('afterend', button);
+    }
+
+    const main = document.querySelector('main.content');
+    if (!main) return;
+
+    const section = document.createElement('section');
+    section.id = 'page-ticket-bans';
+    section.className = 'page hidden';
+    section.innerHTML = `
+      <h2>Bans tickets</h2>
+      <div class="filters">
+        <select id="ban-filter-status">
+          <option value="">Tous les statuts</option>
+          <option value="active">Actifs</option>
+          <option value="expired">Expires</option>
+          <option value="revoked">Revoques</option>
+        </select>
+        <input type="text" id="ban-filter-user" placeholder="ID utilisateur..." style="max-width:220px">
+        <button type="button" class="btn-secondary" id="ban-filter-reset">Reinitialiser</button>
+      </div>
+      <div class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>Utilisateur</th>
+              <th>Statut</th>
+              <th>Expiration</th>
+              <th>Raison</th>
+              <th>Banni par</th>
+              <th>Cree le</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="ticket-bans-body"><tr><td colspan="7" class="loading">Chargement...</td></tr></tbody>
+        </table>
+      </div>
+    `;
+
+    const ticketsPage = byId('page-tickets');
+    if (ticketsPage) ticketsPage.insertAdjacentElement('afterend', section);
+    else main.appendChild(section);
+  };
+
+  const showPage = name => {
+    document.querySelectorAll('.page').forEach(page => page.classList.add('hidden'));
+    document.querySelectorAll('.nav-btn').forEach(button => button.classList.remove('active'));
+    byId(`page-${name}`)?.classList.remove('hidden');
+    document.querySelector(`[data-page="${name}"]`)?.classList.add('active');
+  };
 
   const renderTicketBans = () => {
     const statusFilter = byId('ban-filter-status')?.value || '';
@@ -109,7 +172,10 @@
 
   document.addEventListener('click', event => {
     const nav = event.target.closest('[data-page="ticket-bans"]');
-    if (nav) loadTicketBans();
+    if (nav) {
+      showPage('ticket-bans');
+      loadTicketBans();
+    }
 
     const unbanButton = event.target.closest('[data-ticket-unban]');
     if (unbanButton) revokeTicketBan(unbanButton.dataset.ticketUnban);
@@ -129,12 +195,6 @@
     byId('ban-filter-user').value = '';
     renderTicketBans();
   });
-})();
 
-(() => {
-  if (document.querySelector('script[data-embed-builder]')) return;
-  const script = document.createElement('script');
-  script.src = 'embed-messages.js';
-  script.dataset.embedBuilder = 'true';
-  document.body.appendChild(script);
+  installUi();
 })();

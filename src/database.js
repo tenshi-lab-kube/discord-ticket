@@ -78,10 +78,23 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS ticket_bans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    banned_by TEXT NOT NULL,
+    reason TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    revoked_at INTEGER,
+    revoked_by TEXT
+  );
+
   CREATE INDEX IF NOT EXISTS idx_tickets_guild ON tickets(guild_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id, guild_id);
   CREATE INDEX IF NOT EXISTS idx_tickets_channel ON tickets(channel_id);
   CREATE INDEX IF NOT EXISTS idx_transcripts_guild ON transcripts(guild_id);
+  CREATE INDEX IF NOT EXISTS idx_ticket_bans_guild_user ON ticket_bans(guild_id, user_id);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_responses_guild_keyword ON custom_responses(guild_id, keyword);
   CREATE INDEX IF NOT EXISTS idx_custom_responses_guild ON custom_responses(guild_id);
 `);
@@ -153,6 +166,64 @@ module.exports = {
     return db.prepare(`
       SELECT * FROM tickets WHERE user_id = ? AND guild_id = ? AND status = 'open'
     `).all(userId, guildId);
+  },
+
+  addTicketBan(data) {
+    const now = Date.now();
+    db.prepare(`
+      UPDATE ticket_bans
+      SET revoked_at = ?, revoked_by = ?
+      WHERE guild_id = ? AND user_id = ? AND revoked_at IS NULL
+        AND (expires_at IS NULL OR expires_at > ?)
+    `).run(now, data.bannedBy, data.guildId, data.userId, now);
+
+    return db.prepare(`
+      INSERT INTO ticket_bans (guild_id, user_id, banned_by, reason, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(data.guildId, data.userId, data.bannedBy, data.reason ?? null, now, data.expiresAt ?? null);
+  },
+
+  revokeTicketBan(guildId, userId, revokedBy) {
+    return db.prepare(`
+      UPDATE ticket_bans
+      SET revoked_at = ?, revoked_by = ?
+      WHERE guild_id = ? AND user_id = ? AND revoked_at IS NULL
+        AND (expires_at IS NULL OR expires_at > ?)
+    `).run(Date.now(), revokedBy, guildId, userId, Date.now());
+  },
+
+  getActiveTicketBan(guildId, userId) {
+    return db.prepare(`
+      SELECT * FROM ticket_bans
+      WHERE guild_id = ? AND user_id = ? AND revoked_at IS NULL
+        AND (expires_at IS NULL OR expires_at > ?)
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(guildId, userId, Date.now());
+  },
+
+  getTicketBanInfo(guildId, userId) {
+    return db.prepare(`
+      SELECT * FROM ticket_bans
+      WHERE guild_id = ? AND user_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(guildId, userId);
+  },
+
+  listTicketBans(guildId) {
+    const now = Date.now();
+    return db.prepare(`
+      SELECT *,
+        CASE
+          WHEN revoked_at IS NOT NULL THEN 'revoked'
+          WHEN expires_at IS NOT NULL AND expires_at <= ? THEN 'expired'
+          ELSE 'active'
+        END AS computed_status
+      FROM ticket_bans
+      WHERE guild_id = ?
+      ORDER BY created_at DESC
+    `).all(now, guildId);
   },
 
   getAllTickets(guildId) {
