@@ -59,9 +59,19 @@ function buildConfirmRow(action, originalMessageId) {
   );
 }
 
-function isStaff(member, config) {
+function hasAnyRole(member, roleIds = []) {
+  return roleIds.some(roleId => member.roles.cache.has(roleId));
+}
+
+function isStaff(member, config, category = null) {
+  if (hasAnyRole(member, config.staffRoles ?? [])) return true;
+  if (category && hasAnyRole(member, category.supportRoles ?? [])) return true;
   if (!config.staffRoles?.length) return member.permissions.has(PermissionFlagsBits.ManageChannels);
-  return config.staffRoles.some(roleId => member.roles.cache.has(roleId));
+  return false;
+}
+
+function getTicketCategory(config, ticket) {
+  return (config.ticketCategories ?? []).find(category => category.id === ticket?.category_id) ?? null;
 }
 
 function getAccessibleTicketCategories(config, member) {
@@ -328,11 +338,7 @@ async function handleCategorySelect(interaction) {
     },
   ];
 
-  const roleIds = [
-    ...(config.staffRoles ?? []),
-    ...(config.adminRoles ?? []),
-    ...(category.supportRoles ?? []),
-  ];
+  const roleIds = category.supportRoles ?? [];
   for (const roleId of [...new Set(roleIds)]) {
     permissionOverwrites.push({
       id: roleId,
@@ -403,11 +409,12 @@ async function handleCategorySelect(interaction) {
 async function handleClaim(interaction) {
   const config = getGuildConfig(interaction.guildId);
   if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
-  if (!isStaff(interaction.member, config)) {
-    return interaction.reply({ content: '❌ Réservé au staff.', flags: MessageFlags.Ephemeral });
-  }
   const ticket = db.getTicketByChannel(interaction.channelId);
   if (!ticket) return interaction.reply({ content: '❌ Ticket introuvable.', flags: MessageFlags.Ephemeral });
+  const category = getTicketCategory(config, ticket);
+  if (!isStaff(interaction.member, config, category)) {
+    return interaction.reply({ content: '❌ Réservé au staff.', flags: MessageFlags.Ephemeral });
+  }
   if (ticket.claimed_by) {
     return interaction.reply({ content: `❌ Déjà claim par <@${ticket.claimed_by}>.`, flags: MessageFlags.Ephemeral });
   }
@@ -424,7 +431,8 @@ async function handleClose(interaction) {
   const ticket = db.getTicketByChannel(interaction.channelId);
   if (!ticket) return interaction.reply({ content: '❌ Ticket introuvable.', flags: MessageFlags.Ephemeral });
   const isOwner = ticket.user_id === interaction.user.id;
-  if (!isOwner && !isStaff(interaction.member, config)) {
+  const category = getTicketCategory(config, ticket);
+  if (!isOwner && !isStaff(interaction.member, config, category)) {
     return interaction.reply({ content: '❌ Permission refusée.', flags: MessageFlags.Ephemeral });
   }
   await interaction.reply({
@@ -437,7 +445,10 @@ async function handleClose(interaction) {
 async function handleReopen(interaction) {
   const config = getGuildConfig(interaction.guildId);
   if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
-  if (!isStaff(interaction.member, config)) {
+  const ticket = db.getTicketByChannel(interaction.channelId);
+  if (!ticket) return interaction.reply({ content: '❌ Ticket introuvable.', flags: MessageFlags.Ephemeral });
+  const category = getTicketCategory(config, ticket);
+  if (!isStaff(interaction.member, config, category)) {
     return interaction.reply({ content: '❌ Réservé au staff.', flags: MessageFlags.Ephemeral });
   }
   await interaction.reply({
@@ -450,7 +461,10 @@ async function handleReopen(interaction) {
 async function handleDelete(interaction) {
   const config = getGuildConfig(interaction.guildId);
   if (!config) return interaction.reply({ content: 'Serveur non configure.', flags: MessageFlags.Ephemeral });
-  if (!isStaff(interaction.member, config)) {
+  const ticket = db.getTicketByChannel(interaction.channelId);
+  if (!ticket) return interaction.reply({ content: '❌ Ticket introuvable.', flags: MessageFlags.Ephemeral });
+  const category = getTicketCategory(config, ticket);
+  if (!isStaff(interaction.member, config, category)) {
     return interaction.reply({ content: '❌ Réservé au staff.', flags: MessageFlags.Ephemeral });
   }
   await interaction.reply({

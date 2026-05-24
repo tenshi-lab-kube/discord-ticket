@@ -496,7 +496,7 @@ router.post('/:guildId/transcripts/:id/reopen', async (req, res) => {
       allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
     });
   }
-  const roleIds = [...new Set([...(req.guildConfig.staffRoles ?? []), ...(req.guildConfig.adminRoles ?? []), ...(category.supportRoles ?? [])])];
+  const roleIds = [...new Set(category.supportRoles ?? [])];
   for (const roleId of roleIds) {
     permissionOverwrites.push({
       id: roleId,

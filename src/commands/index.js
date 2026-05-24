@@ -8,9 +8,19 @@ const {
   removeCustomResponseByKeyword,
 } = require('../customResponses');
 
-function isStaff(member, config) {
+function hasAnyRole(member, roleIds = []) {
+  return roleIds.some(roleId => member.roles.cache.has(roleId));
+}
+
+function isStaff(member, config, category = null) {
+  if (hasAnyRole(member, config.staffRoles ?? [])) return true;
+  if (category && hasAnyRole(member, category.supportRoles ?? [])) return true;
   if (!config.staffRoles?.length) return member.permissions.has(PermissionFlagsBits.ManageChannels);
-  return config.staffRoles.some(roleId => member.roles.cache.has(roleId));
+  return false;
+}
+
+function getTicketCategory(config, ticket) {
+  return (config.ticketCategories ?? []).find(category => category.id === ticket?.category_id) ?? null;
 }
 
 function canManageGuild(member) {
@@ -264,11 +274,12 @@ const ticketCommand = {
     if (!config) return interaction.reply({ content: 'Serveur non configure.', ephemeral: true });
     const ticket = db.getTicketByChannel(interaction.channelId);
     if (!ticket) return interaction.reply({ content: '❌ Ce salon n\'est pas un ticket.', ephemeral: true });
+    const ticketCategory = getTicketCategory(config, ticket);
 
     const sub = interaction.options.getSubcommand();
 
     if (sub === 'rename') {
-      if (!isStaff(interaction.member, config)) {
+      if (!isStaff(interaction.member, config, ticketCategory)) {
         return interaction.reply({ content: '❌ Réservé au staff.', ephemeral: true });
       }
       const name = interaction.options.getString('nom').toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 100);
@@ -277,7 +288,7 @@ const ticketCommand = {
     }
 
     if (sub === 'move') {
-      if (!isStaff(interaction.member, config)) {
+      if (!isStaff(interaction.member, config, ticketCategory)) {
         return interaction.reply({ content: '❌ Réservé au staff.', ephemeral: true });
       }
       const catId = interaction.options.getString('categorie');
@@ -289,12 +300,27 @@ const ticketCommand = {
         if (discordCat) await interaction.channel.setParent(discordCat, { lockPermissions: false });
       }
 
+      const previousSupportRoles = new Set(ticketCategory?.supportRoles ?? []);
+      const nextSupportRoles = new Set(category.supportRoles ?? []);
+      for (const roleId of previousSupportRoles) {
+        if (!nextSupportRoles.has(roleId)) {
+          await interaction.channel.permissionOverwrites.delete(roleId).catch(() => {});
+        }
+      }
+      for (const roleId of nextSupportRoles) {
+        await interaction.channel.permissionOverwrites.edit(roleId, {
+          ViewChannel: true,
+          SendMessages: true,
+          ReadMessageHistory: true,
+        }).catch(() => {});
+      }
+
       db.updateTicketCategory(interaction.channelId, catId);
       return interaction.reply({ content: `✅ Ticket déplacé vers **${category.emoji} ${category.name}**` });
     }
 
     if (sub === 'add') {
-      if (!isStaff(interaction.member, config)) {
+      if (!isStaff(interaction.member, config, ticketCategory)) {
         return interaction.reply({ content: '❌ Réservé au staff.', ephemeral: true });
       }
       const user = interaction.options.getUser('utilisateur');
@@ -305,7 +331,7 @@ const ticketCommand = {
     }
 
     if (sub === 'remove') {
-      if (!isStaff(interaction.member, config)) {
+      if (!isStaff(interaction.member, config, ticketCategory)) {
         return interaction.reply({ content: '❌ Réservé au staff.', ephemeral: true });
       }
       const user = interaction.options.getUser('utilisateur');
